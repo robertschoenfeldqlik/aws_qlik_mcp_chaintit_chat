@@ -193,32 +193,75 @@ async def poll_for_oauth_and_connect():
 
 @cl.action_callback("reconnect_qlik")
 async def on_reconnect_qlik(action: cl.Action):
-    """Reconnect to Qlik MCP using the saved OAuth token."""
+    """Reconnect to Qlik MCP. Tries saved token first, falls back to new OAuth flow."""
     access_token = cl.user_session.get("qlik_access_token")
     tenant_url = cl.user_session.get("qlik_tenant_url")
+    client_id = cl.user_session.get("qlik_client_id")
 
-    if not access_token or not tenant_url:
-        await cl.Message(content="No saved credentials. Click the **plug icon** to connect to Qlik Cloud.").send()
+    if not tenant_url or not client_id:
+        await cl.Message(content="No Qlik credentials saved. Click the **plug icon** to connect.").send()
         return
 
-    await cl.Message(content="Reconnecting to Qlik MCP...").send()
+    # Try reconnecting with saved token first
+    if access_token:
+        await cl.Message(content="Reconnecting to Qlik MCP...").send()
+        try:
+            await disconnect_qlik_mcp()
+            mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
+            cl.user_session.set("mcp_client", mcp_client)
+            cl.user_session.set("mcp_tools", tools)
+            build_agent_if_ready()
+            tool_names = [t.name for t in tools]
+            actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Reconnect to Qlik", payload={})]
+            await cl.Message(
+                content=f"Reconnected! **{len(tools)} tools** available:\n" + "\n".join(f"- `{n}`" for n in tool_names),
+                actions=actions,
+            ).send()
+            return
+        except Exception as e:
+            logger.warning(f"Token reconnect failed, starting new OAuth flow: {e}")
 
-    try:
-        await disconnect_qlik_mcp()
-        mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
-        cl.user_session.set("mcp_client", mcp_client)
-        cl.user_session.set("mcp_tools", tools)
-        build_agent_if_ready()
-        tool_names = [t.name for t in tools]
-        actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Re-establish Qlik MCP connection", payload={})]
-        await cl.Message(
-            content=f"Reconnected! **{len(tools)} tools** available:\n" + "\n".join(f"- `{n}`" for n in tool_names),
-            actions=actions,
-        ).send()
-    except Exception as e:
-        await cl.Message(
-            content=f"Reconnection failed:\n```\n{e}\n```\n\nYour token may have expired. Click the **plug icon** to re-authenticate."
-        ).send()
+    # Token expired or missing — start new OAuth flow automatically
+    import secrets as _secrets
+    state = _secrets.token_urlsafe(32)
+    base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
+    oauth_url = (
+        f"{base_url}/auth/qlik/start?"
+        + urllib.parse.urlencode({"tenant_url": tenant_url, "client_id": client_id, "state": state})
+    )
+
+    await cl.Message(
+        content=(
+            "Session expired. Please re-authenticate:\n\n"
+            f"**[Click here to sign in to Qlik Cloud]({oauth_url})**\n\n"
+            "_Waiting for approval..._"
+        )
+    ).send()
+
+    # Poll for OAuth completion
+    for _ in range(90):
+        await asyncio.sleep(2)
+        if state in completed_tokens:
+            token_data = completed_tokens.pop(state)
+            cl.user_session.set("qlik_access_token", token_data["access_token"])
+            cl.user_session.set("qlik_tenant_url", token_data["tenant_url"])
+            try:
+                await disconnect_qlik_mcp()
+                mcp_client, tools = await connect_qlik_mcp(token_data["tenant_url"], token_data["access_token"])
+                cl.user_session.set("mcp_client", mcp_client)
+                cl.user_session.set("mcp_tools", tools)
+                build_agent_if_ready()
+                tool_names = [t.name for t in tools]
+                actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Reconnect to Qlik", payload={})]
+                await cl.Message(
+                    content=f"Re-authenticated! Connected with **{len(tools)} tools**:\n" + "\n".join(f"- `{n}`" for n in tool_names),
+                    actions=actions,
+                ).send()
+            except Exception as e:
+                await cl.Message(content=f"OAuth succeeded but MCP connection failed:\n```\n{e}\n```").send()
+            return
+
+    await cl.Message(content="Re-authentication timed out. Click **Refresh Qlik MCP** to try again.").send()
 
 
 # ---------------------------------------------------------------------------
