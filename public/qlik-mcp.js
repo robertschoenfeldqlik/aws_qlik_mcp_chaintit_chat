@@ -12,7 +12,14 @@
   fetch("/auth/qlik/defaults").then(r => r.json()).then(d => { defaults = d; }).catch(() => {});
 
   function replaceDialog(dialog) {
-    if (!dialog.textContent.includes("MCP") && !dialog.textContent.includes("Connect an")) return;
+    // Only target the MCP Servers dialog, NOT the Readme dialog
+    // The MCP dialog has "MCP Servers" as the title in an h2, and "Connect an MCP" tab
+    const title = dialog.querySelector("h2");
+    const isMcpDialog = title && (title.textContent.trim() === "MCP Servers");
+    const hasConnectTab = Array.from(dialog.querySelectorAll("button")).some(
+      b => b.textContent.trim() === "Connect an MCP" || b.textContent.trim() === "Connect to Qlik"
+    );
+    if (!isMcpDialog && !hasConnectTab) return;
     if (dialog.querySelector("#qlik-form")) return;
 
     // Hide ALL existing Chainlit content including tabs
