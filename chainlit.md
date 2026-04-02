@@ -183,6 +183,10 @@ Verify `http://localhost:8000/auth/qlik/callback` is registered as a redirect UR
 ### Bedrock API key expired
 Generate a new key from Bedrock console → API keys. Short-term keys last up to 12 hours.
 
+## Disclaimer
+
+This tool is provided **as-is** without warranty of any kind. It is intended for demonstration and presales purposes. Use at your own risk. The authors are not responsible for any costs incurred through AWS Bedrock usage or any data accessed through Qlik Cloud MCP connections.
+
 ## License
 
 See [LICENSE](LICENSE) for details.
