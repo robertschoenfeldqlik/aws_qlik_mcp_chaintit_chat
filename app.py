@@ -158,17 +158,12 @@ async def on_chat_start():
     chat_model = get_chat_model(model_id, default_region, 0.7, 4096, default_api_key)
     cl.user_session.set("chat_model", chat_model)
 
-    tenant_url = os.getenv("QLIK_TENANT_URL", "your-tenant.us.qlikcloud.com")
-    mcp_url = f"{tenant_url.rstrip('/')}/api/ai/mcp"
-
     await cl.Message(
         content=(
             "![Qlik](/public/qlik-logo.png)\n\n"
             "## Your Friendly Neighborhood AI Assistant\n\n"
-            f"1. Click the **plug icon** → select **SSE** → enter URL: `{mcp_url}`\n"
-            "2. Enter your **OAuth Client ID** (no secret needed)\n"
-            "3. Click **Confirm** → sign in to Qlik Cloud → click **Approve**\n"
-            "4. Click the **gear icon** to configure AWS Bedrock\n\n"
+            "1. Click the **plug icon** to connect to Qlik Cloud\n"
+            "2. Click the **gear icon** to configure AWS Bedrock\n\n"
             f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
         )
     ).send()
