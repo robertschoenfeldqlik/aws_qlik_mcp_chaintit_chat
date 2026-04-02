@@ -1,18 +1,11 @@
-# Qlik AI Assistant
+# Your Friendly Neighborhood Qlik AI Assistant
 
-Welcome! This assistant connects to your **Qlik Cloud** data through **AWS Bedrock** LLMs.
+Welcome! I connect your **Qlik Cloud** data to **AWS Bedrock** LLMs so you can explore your data through natural conversation.
 
 ## Getting Started
 
-1. **Configure the model** — Click the gear icon to select your Bedrock model and AWS region
-2. **Connect to Qlik** — Click the plug icon to add your Qlik MCP server connection
-3. **Ask questions** — Query your Qlik data using natural language
+1. Open **Settings** to enter your AWS and Qlik credentials
+2. Select your preferred Bedrock model
+3. Start asking questions about your data!
 
-## MCP Server Options
-
-**Qlik Cloud Native (OAuth):**
-- URL: `https://your-tenant.us.qlikcloud.com/api/ai/mcp`
-
-**Community Package (API Key):**
-- Command: `npx -y @agentsbazaar/mcp`
-- Requires `QLIK_TENANT_URL` and `QLIK_API_KEY` environment variables
+Need help setting up Qlik MCP? Check the [setup guide](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm).

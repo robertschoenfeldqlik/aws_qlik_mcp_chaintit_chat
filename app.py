@@ -51,21 +51,34 @@ SYSTEM_PROMPT = (
 QLIK_MCP_HELP_URL = "https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm"
 
 
-def get_bedrock_client(region: str):
-    """Create a Bedrock runtime client."""
-    return boto3.client(
-        "bedrock-runtime",
-        region_name=region,
-        config=Config(
+def get_bedrock_client(region: str, access_key: str = "", secret_key: str = ""):
+    """Create a Bedrock runtime client with optional explicit credentials."""
+    kwargs = {
+        "service_name": "bedrock-runtime",
+        "region_name": region,
+        "config": Config(
             retries={"max_attempts": 5, "mode": "adaptive"},
             read_timeout=60,
         ),
-    )
+    }
+    # Use explicit credentials if provided, otherwise fall back to env/IAM role
+    if access_key and secret_key:
+        kwargs["aws_access_key_id"] = access_key
+        kwargs["aws_secret_access_key"] = secret_key
+
+    return boto3.client(**kwargs)
 
 
-def get_chat_model(model_id: str, region: str, temperature: float, max_tokens: int):
+def get_chat_model(
+    model_id: str,
+    region: str,
+    temperature: float,
+    max_tokens: int,
+    access_key: str = "",
+    secret_key: str = "",
+):
     """Create a ChatBedrockConverse model."""
-    client = get_bedrock_client(region)
+    client = get_bedrock_client(region, access_key, secret_key)
     full_model_id = f"us.{model_id}"
     return ChatBedrockConverse(
         model=full_model_id,
@@ -137,7 +150,7 @@ async def ensure_mcp_connected():
         cl.user_session.set("mcp_tools", tools)
         cl.user_session.set("agent", agent)
 
-        await cl.Message(content=f"Reconnected to Qlik MCP. **{len(tools)} tools** available.").send()
+        await cl.Message(content=f"Back in action! Reconnected to Qlik MCP with **{len(tools)} tools** available.").send()
         return True
     except Exception as e:
         logger.error(f"Reconnection failed: {e}")
@@ -189,6 +202,8 @@ async def on_reconnect_action(action: cl.Action):
 async def on_chat_start():
     """Initialize chat session with settings panel."""
     default_region = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
+    default_access_key = os.getenv("AWS_ACCESS_KEY_ID", "")
+    default_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     default_tenant = os.getenv("QLIK_TENANT_URL", "")
     default_client_id = os.getenv("QLIK_OAUTH_CLIENT_ID", "")
     default_client_secret = os.getenv("QLIK_OAUTH_CLIENT_SECRET", "")
@@ -218,13 +233,20 @@ async def on_chat_start():
                 placeholder="Leave empty if not required",
                 description="OAuth client secret (leave empty for most configurations)",
             ),
-            # --- Bedrock Settings ---
-            Select(
-                id="bedrock_model",
-                label="Bedrock Model",
-                values=list(BEDROCK_MODELS.keys()),
-                initial_value="Claude 3.7 Sonnet",
-                description="Select the foundation model to use",
+            # --- AWS Bedrock Settings ---
+            TextInput(
+                id="aws_access_key_id",
+                label="AWS Access Key ID",
+                initial=default_access_key,
+                placeholder="AKIA...",
+                description="IAM access key with bedrock:InvokeModel permissions",
+            ),
+            TextInput(
+                id="aws_secret_access_key",
+                label="AWS Secret Access Key",
+                initial=default_secret_key,
+                placeholder="Your secret key",
+                description="IAM secret access key (stored in session only, never logged)",
             ),
             Select(
                 id="aws_region",
@@ -232,6 +254,13 @@ async def on_chat_start():
                 values=AWS_REGIONS,
                 initial_value=default_region,
                 description="AWS region for Bedrock API calls",
+            ),
+            Select(
+                id="bedrock_model",
+                label="Bedrock Model",
+                values=list(BEDROCK_MODELS.keys()),
+                initial_value="Claude 3.7 Sonnet",
+                description="Select the foundation model to use",
             ),
             Slider(
                 id="temperature",
@@ -257,7 +286,7 @@ async def on_chat_start():
 
     # Initialize Bedrock model with defaults
     model_id = BEDROCK_MODELS["Claude 3.7 Sonnet"]
-    chat_model = get_chat_model(model_id, default_region, 0.7, 4096)
+    chat_model = get_chat_model(model_id, default_region, 0.7, 4096, default_access_key, default_secret_key)
     cl.user_session.set("chat_model", chat_model)
     cl.user_session.set("chat_messages", [])
 
@@ -276,7 +305,7 @@ async def on_chat_start():
             actions = [cl.Action(name="reconnect_mcp", label="Reconnect to Qlik MCP", description="Re-establish the MCP connection", payload={})]
             await cl.Message(
                 content=(
-                    f"**Qlik AI Assistant** ready. Connected to Qlik MCP with **{len(tools)} tools**:\n"
+                    f"Your friendly neighborhood **Qlik AI Assistant** is ready! Connected to Qlik MCP with **{len(tools)} tools**:\n"
                     + "\n".join(f"- `{name}`" for name in tool_names)
                 ),
                 actions=actions,
@@ -286,7 +315,7 @@ async def on_chat_start():
             logger.error(f"Auto-connect failed: {e}")
             await cl.Message(
                 content=(
-                    f"**Qlik AI Assistant** ready, but auto-connect to Qlik MCP failed:\n"
+                    f"Your friendly neighborhood **Qlik AI Assistant** is here, but auto-connect to Qlik MCP failed:\n"
                     f"```\n{str(e)}\n```\n\n"
                     f"Open **Settings** (gear icon) to configure your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
                     f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
@@ -296,12 +325,15 @@ async def on_chat_start():
 
     await cl.Message(
         content=(
-            "**Qlik AI Assistant** ready.\n\n"
-            "1. Open **Settings** (gear icon)\n"
-            "2. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
-            "3. Optionally enter the **OAuth Client Secret** (leave empty if not required)\n"
-            "4. Configure the **Bedrock model** and **region**\n"
-            "5. Click **Confirm** to connect\n\n"
+            "Your friendly neighborhood **Qlik AI Assistant** is here!\n\n"
+            "Let's get you connected:\n\n"
+            "**Qlik Cloud:**\n"
+            "1. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
+            "2. Optionally enter the **OAuth Client Secret** (leave empty if not required)\n\n"
+            "**AWS Bedrock:**\n"
+            "3. Enter your **AWS Access Key ID** and **Secret Access Key**\n"
+            "4. Select your **Region** and **Model**\n\n"
+            "5. Click **Confirm** to connect!\n\n"
             f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
         )
     ).send()
@@ -311,18 +343,22 @@ async def on_chat_start():
 async def on_settings_update(settings: dict):
     """Handle settings changes — reconnect MCP and/or rebuild model."""
     # Extract settings
+    # AWS settings
+    access_key = settings.get("aws_access_key_id", "").strip()
+    secret_key = settings.get("aws_secret_access_key", "").strip()
     model_name = settings.get("bedrock_model", "Claude 3.7 Sonnet")
     model_id = BEDROCK_MODELS[model_name]
     region = settings.get("aws_region", "us-west-2")
     temperature = settings.get("temperature", 0.7)
     max_tokens = int(settings.get("max_tokens", 4096))
 
+    # Qlik settings
     tenant_url = settings.get("qlik_tenant_url", "").strip()
     client_id = settings.get("qlik_client_id", "").strip()
     client_secret = settings.get("qlik_client_secret", "").strip()
 
-    # Update Bedrock model
-    chat_model = get_chat_model(model_id, region, temperature, max_tokens)
+    # Update Bedrock model with credentials
+    chat_model = get_chat_model(model_id, region, temperature, max_tokens, access_key, secret_key)
     cl.user_session.set("chat_model", chat_model)
 
     # Check if Qlik settings changed

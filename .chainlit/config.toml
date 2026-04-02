@@ -97,21 +97,21 @@ reaction_on_message_received = false
 # Name of the assistant.
 name = "Qlik AI Assistant"
 
-# default_theme = "dark"
+default_theme = "dark"
 
 # Force a specific language for all users (e.g., "en-US", "he-IL", "fr-FR")
 # If not set, the browser's language will be used
 # language = "en-US"
 
-# layout = "wide"
+layout = "wide"
 
 # default_sidebar_state = "open"  # Options: "open", "closed", "hidden"
 
 # Chat settings display location: "message_composer" (default) or "sidebar" (header)
-# chat_settings_location = "message_composer"
+chat_settings_location = "sidebar"
 
 # Default state of chat settings sidebar when location is "sidebar"
-# default_chat_settings_open = false
+default_chat_settings_open = true
 
 # Whether to prompt user confirmation on clicking 'New Chat'
 confirm_new_chat = true
@@ -124,7 +124,7 @@ cot = "full"
 
 # Specify a CSS file that can be used to customize the user interface.
 # The CSS file can be served from the public directory or via an external link.
-# custom_css = "/public/test.css"
+custom_css = "/public/qlik-theme.css"
 
 # Specify additional attributes for a custom CSS file
 # custom_css_attributes = "media=\"print\""
@@ -153,7 +153,7 @@ alert_style = "classic"
 # custom_meta_image_url = "https://chainlit-cloud.s3.eu-west-3.amazonaws.com/logo/chainlit_banner.png"
 
 # Load assistant logo directly from URL.
-logo_file_url = ""
+logo_file_url = "/public/qlik-logo.png"
 
 # Load assistant avatar image directly from URL.
 default_avatar_file_url = ""

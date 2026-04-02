@@ -1,0 +1,90 @@
+/* Qlik Brand Theme for Chainlit */
+/* Colors: Green #009845, Gray #54565A, Navy #194268, Teal #006580 */
+
+/* Global font smoothing */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Header / top bar branding */
+header {
+  border-bottom: 2px solid #009845 !important;
+}
+
+/* Logo sizing in header */
+header img {
+  max-height: 40px !important;
+  object-fit: contain;
+}
+
+/* Primary action buttons — Qlik Green */
+button[data-testid="send-button"],
+button[data-variant="default"] {
+  background-color: #009845 !important;
+  border-color: #009845 !important;
+  color: white !important;
+}
+
+button[data-testid="send-button"]:hover,
+button[data-variant="default"]:hover {
+  background-color: #007a38 !important;
+  border-color: #007a38 !important;
+}
+
+/* Action buttons (Reconnect, etc.) */
+.cl-action-button,
+button[class*="action"] {
+  background-color: #009845 !important;
+  color: white !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+}
+
+.cl-action-button:hover,
+button[class*="action"]:hover {
+  background-color: #007a38 !important;
+}
+
+/* Links — Qlik Teal */
+a {
+  color: #006580 !important;
+}
+
+a:hover {
+  color: #009845 !important;
+}
+
+/* Message bubbles */
+[data-testid="assistant-message"] {
+  border-left: 3px solid #009845;
+}
+
+/* Settings sidebar polish */
+[data-testid="chat-settings"] label {
+  font-weight: 600;
+  color: #194268;
+}
+
+/* Code blocks */
+pre, code {
+  border-radius: 6px !important;
+}
+
+/* Scrollbar styling (webkit) */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #54565A;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #009845;
+}
