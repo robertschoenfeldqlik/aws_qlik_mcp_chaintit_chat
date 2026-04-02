@@ -35,6 +35,10 @@ A branded web chat application that connects **Qlik Cloud** data to **Anthropic 
 2. **Gear icon** → Configure Bedrock API Key, region, model
 3. **Ask questions** → Claude calls Qlik MCP tools → returns data from your tenant
 
+## Cost Warning
+
+> **This application uses AWS Bedrock which charges per API call.** Claude Sonnet 4 pricing on Bedrock is approximately **$3 per million input tokens** and **$15 per million output tokens**. Each question you ask makes at least one LLM call plus one or more MCP tool calls. For light demo/presales use this typically costs **$1-5/month**, but heavy usage with complex multi-step queries can add up. Monitor your costs in the [AWS Billing console](https://console.aws.amazon.com/billing/home). Consider setting up [AWS Budgets](https://console.aws.amazon.com/billing/home#/budgets) to alert you when spending exceeds a threshold.
+
 ## Prerequisites
 
 ### AWS Bedrock
