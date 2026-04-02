@@ -36,10 +36,10 @@ logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
 register_oauth_routes(fastapi_app)
 
 BEDROCK_MODELS = {
-    "Claude 4 Sonnet": "anthropic.claude-sonnet-4-20250514",
-    "Claude 3.7 Sonnet": "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    "Claude 4 Sonnet": "anthropic.claude-sonnet-4-20250514-v1:0",
+    "Claude 4 Haiku": "anthropic.claude-haiku-4-20250514-v1:0",
+    "Claude 4 Sonnet": "anthropic.claude-3-7-sonnet-20250219-v1:0",
     "Claude 3.5 Haiku": "anthropic.claude-3-5-haiku-20241022-v1:0",
-    "Claude 3.5 Sonnet v2": "anthropic.claude-3-5-sonnet-20241022-v2:0",
 }
 
 AWS_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1", "ap-northeast-1"]
@@ -198,7 +198,7 @@ async def on_chat_start():
         Select(id="aws_region", label="AWS Region", values=AWS_REGIONS, initial_value=default_region,
                description="AWS region for Bedrock API calls"),
         Select(id="bedrock_model", label="Bedrock Model", values=list(BEDROCK_MODELS.keys()),
-               initial_value="Claude 3.7 Sonnet", description="Select the foundation model to use"),
+               initial_value="Claude 4 Sonnet", description="Select the foundation model to use"),
         Slider(id="temperature", label="Temperature", initial=0.7, min=0.0, max=1.0, step=0.1,
                description="Controls randomness in responses"),
         Slider(id="max_tokens", label="Max Tokens", initial=4096, min=256, max=32768, step=256,
@@ -206,7 +206,7 @@ async def on_chat_start():
     ])
     await settings.send()
 
-    model_id = BEDROCK_MODELS["Claude 3.7 Sonnet"]
+    model_id = BEDROCK_MODELS["Claude 4 Sonnet"]
     chat_model = get_chat_model(model_id, default_region, 0.7, 4096, default_access_key, default_secret_key)
     cl.user_session.set("chat_model", chat_model)
 
@@ -228,7 +228,7 @@ async def on_chat_start():
 async def on_settings_update(settings: dict):
     access_key = (settings.get("aws_access_key_id") or "").strip()
     secret_key = (settings.get("aws_secret_access_key") or "").strip()
-    model_name = settings.get("bedrock_model") or "Claude 3.7 Sonnet"
+    model_name = settings.get("bedrock_model") or "Claude 4 Sonnet"
     model_id = BEDROCK_MODELS[model_name]
     region = settings.get("aws_region") or "us-west-2"
     temperature = settings.get("temperature") or 0.7
