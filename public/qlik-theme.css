@@ -106,7 +106,7 @@ body::after {
   height: 50px;
   background-image: url("/public/powered-by-aws.png"), radial-gradient(circle at 50% 50%, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.5) 40%, rgba(255,255,255,0.2) 65%, transparent 85%);
   background-repeat: no-repeat;
-  background-position: center center;
+  background-position: center 60%;
   background-size: 70px auto, 100% 100%;
   opacity: 0.95;
   z-index: 50;
