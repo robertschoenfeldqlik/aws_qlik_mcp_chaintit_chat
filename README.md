@@ -113,7 +113,7 @@ Open [http://localhost:8000](http://localhost:8000).
 |---|---|---|
 | **Bedrock API Key** | From env | Bedrock API key |
 | **AWS Region** | us-east-1 | Must match API key region |
-| **Bedrock Model** | Claude 4 Sonnet | Claude 4 Sonnet, Amazon Nova Pro, Meta Llama 3.3 70B |
+| **Bedrock Model** | Claude 4 Sonnet | Claude Sonnet 4 recommended — best performance and cost for tool calling |
 | **Temperature** | 0.2 | Lower = more deterministic tool calling |
 | **Max Tokens** | 4096 | Response length limit |
 
@@ -127,34 +127,13 @@ Click **Connect** → redirects to Qlik Cloud OAuth → sign in → approve → 
 
 The OAuth flow uses **Authorization Code + PKCE (S256)** via the `streamable-http` MCP transport.
 
-## Qlik MCP Connection Details
+## Qlik MCP Documentation
 
-| Parameter | Value |
-|---|---|
-| **Transport** | `streamable-http` |
-| **MCP URL** | `https://<tenant>/api/ai/mcp` |
-| **Header** | `X-Agent-Id: <oauth-client-id>` |
-| **Auth Header** | `Authorization: Bearer <oauth-token>` |
-| **OAuth Authorize** | `https://<tenant>/oauth/authorize` |
-| **OAuth Token** | `https://<tenant>/oauth/token` |
-| **Scopes** | `user_default mcp:execute` |
-| **PKCE** | S256 code challenge |
-| **Grant Types** | `authorization_code`, `refresh_token` |
-| **Client Secret** | None (native/public client) |
+For full details on the Qlik MCP server, available tools, connection parameters, and OAuth configuration, see the official Qlik documentation:
 
-## 51 Available Qlik MCP Tools
-
-| Category | Tools |
-|---|---|
-| **Search** | `qlik_search`, `qlik_search_field_values`, `qlik_search_glossary_terms` |
-| **Apps** | `qlik_describe_app`, `qlik_list_sheets`, `qlik_create_sheet`, `qlik_get_sheet_details` |
-| **Charts** | `qlik_get_chart_info`, `qlik_get_chart_data`, `qlik_add_chart`, `qlik_add_filter` |
-| **Dimensions/Measures** | `qlik_list_dimensions`, `qlik_create_dimension`, `qlik_list_measures`, `qlik_create_measure` |
-| **Fields/Data** | `qlik_get_fields`, `qlik_get_field_values`, `qlik_create_data_object` |
-| **Selections** | `qlik_get_current_selections`, `qlik_select_values`, `qlik_clear_selections` |
-| **Datasets** | `qlik_get_dataset`, `qlik_get_dataset_schema`, `qlik_get_dataset_profile`, `qlik_get_dataset_sample`, `qlik_get_dataset_trust_score`, `qlik_get_lineage`, `qlik_update_dataset_metadata`, `qlik_update_dataset_quality`, `qlik_get_dataset_memberships`, `qlik_get_dataset_quality_computation_status`, `qlik_get_dataset_freshness` |
-| **Data Products** | `qlik_create_data_product`, `qlik_update_data_product`, `qlik_delete_data_product`, `qlik_get_data_product`, `qlik_get_data_product_documentation`, `qlik_update_data_product_space`, `qlik_update_activate_data_product`, `qlik_update_deactivate_data_product` |
-| **Glossary** | `qlik_create_glossary`, `qlik_create_glossary_term`, `qlik_update_glossary_term`, `qlik_delete_glossary_term`, `qlik_get_glossary_term`, `qlik_get_glossary_categories`, `qlik_get_glossary_term_links`, `qlik_create_glossary_term_links`, `qlik_update_term_status`, `qlik_create_glossary_category`, `qlik_get_full_glossary_export` |
+- [Connecting to the Qlik MCP server](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm)
+- [Qlik MCP server tools](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Qlik-MCP-server-tools.htm)
+- [Deploying Qlik MCP server for a tenant](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Administering-Qlik-MCP.htm)
 
 ## Project Structure
 
