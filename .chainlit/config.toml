@@ -111,7 +111,7 @@ layout = "wide"
 chat_settings_location = "sidebar"
 
 # Default state of chat settings sidebar when location is "sidebar"
-default_chat_settings_open = true
+default_chat_settings_open = false
 
 # Whether to prompt user confirmation on clicking 'New Chat'
 confirm_new_chat = true
