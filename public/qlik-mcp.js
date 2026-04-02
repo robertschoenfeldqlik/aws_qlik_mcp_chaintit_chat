@@ -43,6 +43,7 @@
     urlInput.type = "text";
     urlInput.id = "qlik-url";
     urlInput.placeholder = "https://your-tenant.us.qlikcloud.com";
+    urlInput.value = localStorage.getItem("qlik_tenant_url") || "";
     urlInput.style.cssText = "width:100%;padding:10px 12px;border-radius:6px;border:1px solid #333;background:#1a2632;color:#e0e0e0;font-size:14px;margin-bottom:16px;box-sizing:border-box;outline:none;";
     // CRITICAL: Stop event propagation so Chainlit doesn't intercept keystrokes
     urlInput.addEventListener("keydown", (e) => e.stopPropagation());
@@ -62,6 +63,7 @@
     cidInput.type = "text";
     cidInput.id = "qlik-cid";
     cidInput.placeholder = "Client ID from your Qlik tenant admin";
+    cidInput.value = localStorage.getItem("qlik_client_id") || "";
     cidInput.style.cssText = "width:100%;padding:10px 12px;border-radius:6px;border:1px solid #333;background:#1a2632;color:#e0e0e0;font-size:14px;margin-bottom:8px;box-sizing:border-box;outline:none;";
     cidInput.addEventListener("keydown", (e) => e.stopPropagation());
     cidInput.addEventListener("keyup", (e) => e.stopPropagation());
@@ -122,6 +124,10 @@
         return;
       }
 
+      // Save credentials to localStorage for next time
+      localStorage.setItem("qlik_tenant_url", url);
+      localStorage.setItem("qlik_client_id", cid);
+
       const state = crypto.randomUUID();
 
       // Open OAuth flow
@@ -148,8 +154,22 @@
       try {
         const resp = await fetch("/auth/qlik/status?state=" + encodeURIComponent(state));
         const data = await resp.json();
-        if (data.complete) {
+        if (data.complete && data.access_token) {
           closeDialog();
+          // Send a special message through the chat to trigger MCP connection
+          // Find the chat input, set the value, and submit
+          const input = document.querySelector('textarea[placeholder*="Type your message"]');
+          if (input) {
+            const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+            nativeSetter.call(input, "/connect_qlik " + data.access_token + " " + data.tenant_url + " " + data.client_id);
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            // Find and click send button
+            await new Promise((r) => setTimeout(r, 200));
+            const sendBtn = input.closest("form")?.querySelector('button[type="submit"]')
+              || document.querySelector('button[data-testid="send-button"]')
+              || input.parentElement?.parentElement?.querySelector("button:last-of-type");
+            if (sendBtn) sendBtn.click();
+          }
           return;
         }
       } catch (e) {}

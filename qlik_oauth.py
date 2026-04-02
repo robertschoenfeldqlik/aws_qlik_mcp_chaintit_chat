@@ -63,11 +63,17 @@ def register_oauth_routes(app):
 
     @oauth_router.get("/auth/qlik/status")
     async def status(request: Request):
-        """Polled by the JS to check if OAuth completed."""
+        """Polled by the JS to check if OAuth completed. Returns token when ready."""
         state = request.query_params.get("state", "")
         from fastapi.responses import JSONResponse
         if state in completed_tokens:
-            return JSONResponse({"complete": True})
+            token_data = completed_tokens.pop(state)
+            return JSONResponse({
+                "complete": True,
+                "access_token": token_data["access_token"],
+                "tenant_url": token_data["tenant_url"],
+                "client_id": token_data["client_id"],
+            })
         return JSONResponse({"complete": False})
 
     @oauth_router.get("/auth/qlik/start")

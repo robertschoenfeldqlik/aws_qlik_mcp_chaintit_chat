@@ -301,8 +301,7 @@ async def on_chat_start():
         )
     ).send()
 
-    # Start background poller for OAuth completion
-    asyncio.create_task(poll_for_oauth_and_connect())
+    # OAuth completion is handled by JS polling + /connect_qlik message
 
 
 @cl.on_settings_update
@@ -324,6 +323,30 @@ async def on_settings_update(settings: dict):
 
 @cl.on_message
 async def on_message(message: cl.Message):
+    # Handle /connect_qlik command from JS OAuth flow
+    if message.content.startswith("/connect_qlik "):
+        parts = message.content.split(" ", 3)
+        if len(parts) >= 4:
+            access_token, tenant_url, client_id = parts[1], parts[2], parts[3]
+            cl.user_session.set("qlik_access_token", access_token)
+            cl.user_session.set("qlik_tenant_url", tenant_url)
+            cl.user_session.set("qlik_client_id", client_id)
+            try:
+                await disconnect_qlik_mcp()
+                mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
+                cl.user_session.set("mcp_client", mcp_client)
+                cl.user_session.set("mcp_tools", tools)
+                build_agent_if_ready()
+                tool_names = [t.name for t in tools]
+                actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Reconnect", payload={})]
+                await cl.Message(
+                    content=f"Connected to Qlik MCP with **{len(tools)} tools**:\n" + "\n".join(f"- `{n}`" for n in tool_names),
+                    actions=actions,
+                ).send()
+            except Exception as e:
+                await cl.Message(content=f"Qlik MCP connection failed:\n```\n{e}\n```").send()
+        return
+
     agent = cast(CompiledStateGraph | None, cl.user_session.get("agent"))
 
     # If no agent (no MCP), use the LLM directly
