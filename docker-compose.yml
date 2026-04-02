@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "${CHAINLIT_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - CHAINLIT_PORT=8000
+    restart: unless-stopped
+    volumes:
+      - ./.chainlit:/app/.chainlit

@@ -1,0 +1,18 @@
+[project]
+name = "Qlik AI Assistant"
+enable_telemetry = false
+
+[features]
+prompt_playground = false
+
+[features.spontaneous_file_upload]
+enabled = false
+
+[UI]
+name = "Qlik AI Assistant"
+description = "Chat with your Qlik data using AWS Bedrock"
+default_collapse_content = true
+hide_cot = false
+
+[UI.theme]
+layout = "wide"
