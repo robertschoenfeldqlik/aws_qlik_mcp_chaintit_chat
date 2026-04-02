@@ -35,11 +35,9 @@ logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
 register_oauth_routes(fastapi_app)
 
 BEDROCK_MODELS = {
-    "Meta Llama 3.3 70B": "meta.llama3-3-70b-instruct-v1:0",
-    "Meta Llama 3.1 70B": "meta.llama3-1-70b-instruct-v1:0",
-    "Amazon Nova Pro": "amazon.nova-pro-v1:0",
-    "Amazon Nova Lite": "amazon.nova-lite-v1:0",
     "Claude 4 Sonnet": "anthropic.claude-sonnet-4-20250514-v1:0",
+    "Amazon Nova Pro": "amazon.nova-pro-v1:0",
+    "Meta Llama 3.3 70B": "meta.llama3-3-70b-instruct-v1:0",
 }
 
 AWS_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1", "ap-northeast-1"]
@@ -137,7 +135,7 @@ async def on_chat_start():
         Select(id="aws_region", label="AWS Region", values=AWS_REGIONS, initial_value=default_region,
                description="Must match the region where you generated the API key"),
         Select(id="bedrock_model", label="Bedrock Model", values=list(BEDROCK_MODELS.keys()),
-               initial_value="Meta Llama 3.3 70B", description="Select the foundation model to use"),
+               initial_value="Claude 4 Sonnet", description="Select the foundation model to use"),
         Slider(id="temperature", label="Temperature", initial=0.2, min=0.0, max=1.0, step=0.1,
                description="Controls randomness in responses"),
         Slider(id="max_tokens", label="Max Tokens", initial=4096, min=256, max=32768, step=256,
@@ -145,7 +143,7 @@ async def on_chat_start():
     ])
     await settings.send()
 
-    model_id = BEDROCK_MODELS["Meta Llama 3.3 70B"]
+    model_id = BEDROCK_MODELS["Claude 4 Sonnet"]
     chat_model = get_chat_model(model_id, default_region, 0.2, 4096, default_api_key)
     cl.user_session.set("chat_model", chat_model)
 
@@ -161,7 +159,7 @@ async def on_chat_start():
 @cl.on_settings_update
 async def on_settings_update(settings: dict):
     api_key = (settings.get("bedrock_api_key") or "").strip()
-    model_name = settings.get("bedrock_model") or "Meta Llama 3.3 70B"
+    model_name = settings.get("bedrock_model") or "Claude 4 Sonnet"
     model_id = BEDROCK_MODELS[model_name]
     region = settings.get("aws_region") or "us-east-1"
     temperature = settings.get("temperature") or 0.2
