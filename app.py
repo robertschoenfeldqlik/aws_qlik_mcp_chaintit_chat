@@ -36,10 +36,11 @@ logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
 register_oauth_routes(fastapi_app)
 
 BEDROCK_MODELS = {
+    "Amazon Nova Pro": "amazon.nova-pro-v1:0",
+    "Amazon Nova Lite": "amazon.nova-lite-v1:0",
+    "Amazon Nova Micro": "amazon.nova-micro-v1:0",
     "Claude 4 Sonnet": "anthropic.claude-sonnet-4-20250514-v1:0",
     "Claude 4 Haiku": "anthropic.claude-haiku-4-20250514-v1:0",
-    "Claude 4 Sonnet": "anthropic.claude-3-7-sonnet-20250219-v1:0",
-    "Claude 3.5 Haiku": "anthropic.claude-3-5-haiku-20241022-v1:0",
 }
 
 AWS_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1", "ap-northeast-1"]
@@ -58,15 +59,14 @@ QLIK_MCP_HELP_URL = "https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/C
 # Bedrock
 # ---------------------------------------------------------------------------
 
-def get_chat_model(model_id, region, temperature, max_tokens, access_key="", secret_key=""):
-    kwargs = {
-        "service_name": "bedrock-runtime", "region_name": region,
-        "config": Config(retries={"max_attempts": 5, "mode": "adaptive"}, read_timeout=60),
-    }
-    if access_key and secret_key:
-        kwargs["aws_access_key_id"] = access_key
-        kwargs["aws_secret_access_key"] = secret_key
-    client = boto3.client(**kwargs)
+def get_chat_model(model_id, region, temperature, max_tokens, api_key=""):
+    # Set bearer token env var so boto3 picks it up
+    if api_key:
+        os.environ["AWS_BEARER_TOKEN_BEDROCK"] = api_key
+    client = boto3.client(
+        "bedrock-runtime", region_name=region,
+        config=Config(retries={"max_attempts": 5, "mode": "adaptive"}, read_timeout=60),
+    )
     return ChatBedrockConverse(model=f"us.{model_id}", client=client, temperature=temperature, max_tokens=max_tokens)
 
 
@@ -161,6 +161,10 @@ async def poll_for_oauth_and_connect():
                 access_token = token_data["access_token"]
                 tenant_url = token_data["tenant_url"]
 
+                # Save token for reconnection
+                cl.user_session.set("qlik_access_token", access_token)
+                cl.user_session.set("qlik_tenant_url", tenant_url)
+
                 try:
                     await disconnect_qlik_mcp()
                     mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
@@ -168,9 +172,11 @@ async def poll_for_oauth_and_connect():
                     cl.user_session.set("mcp_tools", tools)
                     build_agent_if_ready()
                     tool_names = [t.name for t in tools]
+                    actions = [cl.Action(name="reconnect_qlik", label="Reconnect to Qlik", description="Re-establish Qlik MCP connection", payload={})]
                     await cl.Message(
                         content=f"Authenticated! Connected to Qlik MCP with **{len(tools)} tools**:\n"
-                        + "\n".join(f"- `{n}`" for n in tool_names)
+                        + "\n".join(f"- `{n}`" for n in tool_names),
+                        actions=actions,
                     ).send()
                 except Exception as e:
                     await cl.Message(content=f"OAuth succeeded but MCP connection failed:\n```\n{e}\n```").send()
@@ -181,24 +187,56 @@ async def poll_for_oauth_and_connect():
 
 
 # ---------------------------------------------------------------------------
+# Reconnect Action
+# ---------------------------------------------------------------------------
+
+
+@cl.action_callback("reconnect_qlik")
+async def on_reconnect_qlik(action: cl.Action):
+    """Reconnect to Qlik MCP using the saved OAuth token."""
+    access_token = cl.user_session.get("qlik_access_token")
+    tenant_url = cl.user_session.get("qlik_tenant_url")
+
+    if not access_token or not tenant_url:
+        await cl.Message(content="No saved credentials. Click the **plug icon** to connect to Qlik Cloud.").send()
+        return
+
+    await cl.Message(content="Reconnecting to Qlik MCP...").send()
+
+    try:
+        await disconnect_qlik_mcp()
+        mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
+        cl.user_session.set("mcp_client", mcp_client)
+        cl.user_session.set("mcp_tools", tools)
+        build_agent_if_ready()
+        tool_names = [t.name for t in tools]
+        actions = [cl.Action(name="reconnect_qlik", label="Reconnect to Qlik", description="Re-establish Qlik MCP connection", payload={})]
+        await cl.Message(
+            content=f"Reconnected! **{len(tools)} tools** available:\n" + "\n".join(f"- `{n}`" for n in tool_names),
+            actions=actions,
+        ).send()
+    except Exception as e:
+        await cl.Message(
+            content=f"Reconnection failed:\n```\n{e}\n```\n\nYour token may have expired. Click the **plug icon** to re-authenticate."
+        ).send()
+
+
+# ---------------------------------------------------------------------------
 # Chat Lifecycle
 # ---------------------------------------------------------------------------
 
 @cl.on_chat_start
 async def on_chat_start():
-    default_region = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
-    default_access_key = os.getenv("AWS_ACCESS_KEY_ID", "")
-    default_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    default_region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+    default_api_key = os.getenv("AWS_BEARER_TOKEN_BEDROCK", "")
 
     settings = cl.ChatSettings([
-        TextInput(id="aws_access_key_id", label="AWS Access Key ID", initial=default_access_key,
-                  placeholder="AKIA...", description="IAM access key with bedrock:InvokeModel permissions"),
-        TextInput(id="aws_secret_access_key", label="AWS Secret Access Key", initial=default_secret_key,
-                  placeholder="Your secret key", description="Stored in session only, never logged"),
+        TextInput(id="bedrock_api_key", label="Bedrock API Key", initial=default_api_key,
+                  placeholder="bedrock-api-key-...", description="Generate from Bedrock console > API keys"),
         Select(id="aws_region", label="AWS Region", values=AWS_REGIONS, initial_value=default_region,
-               description="AWS region for Bedrock API calls"),
+               description="Must match the region where you generated the API key"),
         Select(id="bedrock_model", label="Bedrock Model", values=list(BEDROCK_MODELS.keys()),
-               initial_value="Claude 4 Sonnet", description="Select the foundation model to use"),
+               initial_value="Amazon Nova Pro", description="Select the foundation model to use"),
         Slider(id="temperature", label="Temperature", initial=0.7, min=0.0, max=1.0, step=0.1,
                description="Controls randomness in responses"),
         Slider(id="max_tokens", label="Max Tokens", initial=4096, min=256, max=32768, step=256,
@@ -206,8 +244,8 @@ async def on_chat_start():
     ])
     await settings.send()
 
-    model_id = BEDROCK_MODELS["Claude 4 Sonnet"]
-    chat_model = get_chat_model(model_id, default_region, 0.7, 4096, default_access_key, default_secret_key)
+    model_id = BEDROCK_MODELS["Amazon Nova Pro"]
+    chat_model = get_chat_model(model_id, default_region, 0.7, 4096, default_api_key)
     cl.user_session.set("chat_model", chat_model)
 
     await cl.Message(
@@ -227,14 +265,14 @@ async def on_chat_start():
 @cl.on_settings_update
 async def on_settings_update(settings: dict):
     access_key = (settings.get("aws_access_key_id") or "").strip()
-    secret_key = (settings.get("aws_secret_access_key") or "").strip()
-    model_name = settings.get("bedrock_model") or "Claude 4 Sonnet"
+    api_key = (settings.get("bedrock_api_key") or "").strip()
+    model_name = settings.get("bedrock_model") or "Amazon Nova Pro"
     model_id = BEDROCK_MODELS[model_name]
-    region = settings.get("aws_region") or "us-west-2"
+    region = settings.get("aws_region") or "us-east-1"
     temperature = settings.get("temperature") or 0.7
     max_tokens = int(settings.get("max_tokens") or 4096)
 
-    chat_model = get_chat_model(model_id, region, temperature, max_tokens, access_key, secret_key)
+    chat_model = get_chat_model(model_id, region, temperature, max_tokens, api_key)
     cl.user_session.set("chat_model", chat_model)
     build_agent_if_ready()
 
@@ -245,10 +283,21 @@ async def on_settings_update(settings: dict):
 async def on_message(message: cl.Message):
     agent = cast(CompiledStateGraph | None, cl.user_session.get("agent"))
 
+    # If no agent (no MCP), use the LLM directly
     if not agent:
-        await cl.Message(
-            content="Not connected to Qlik yet. Click the **plug icon** to connect to Qlik Cloud."
-        ).send()
+        chat_model = cl.user_session.get("chat_model")
+        if not chat_model:
+            await cl.Message(content="No LLM configured. Check your AWS Bedrock settings.").send()
+            return
+        try:
+            from langchain_core.messages import HumanMessage
+            resp = await chat_model.ainvoke([HumanMessage(content=message.content)])
+            text = resp.content if isinstance(resp.content, str) else str(resp.content)
+            text += "\n\n---\n*No Qlik MCP connected. Click the **plug icon** to access your Qlik data.*"
+            await cl.Message(content=text).send()
+        except Exception as e:
+            await cl.Message(content=f"LLM Error: {str(e)}").send()
+            logger.error(tb.format_exc())
         return
 
     config = RunnableConfig(configurable={"thread_id": cl.context.session.id})
@@ -270,7 +319,22 @@ async def on_message(message: cl.Message):
         error_str = str(e).lower()
         if any(kw in error_str for kw in ["timeout", "closed", "connection", "eof", "reset"]):
             cl.user_session.set("agent", None)
-            await cl.Message(content="Connection lost. Click the **plug icon** to reconnect.").send()
+            # Try auto-reconnect with saved token
+            access_token = cl.user_session.get("qlik_access_token")
+            tenant_url = cl.user_session.get("qlik_tenant_url")
+            if access_token and tenant_url:
+                try:
+                    await disconnect_qlik_mcp()
+                    mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
+                    cl.user_session.set("mcp_client", mcp_client)
+                    cl.user_session.set("mcp_tools", tools)
+                    build_agent_if_ready()
+                    await cl.Message(content="Connection restored. Please resend your message.").send()
+                    return
+                except Exception:
+                    pass
+            actions = [cl.Action(name="reconnect_qlik", label="Reconnect to Qlik", description="Re-establish connection", payload={})]
+            await cl.Message(content="Connection lost.", actions=actions).send()
         else:
             await cl.Message(content=f"Error: {str(e)}").send()
             logger.error(tb.format_exc())
