@@ -96,17 +96,20 @@ pre, code {
   background-color: #009845;
 }
 
-/* Powered by AWS badge — lower right corner */
+/* Powered by AWS badge — lower right corner with gradient blend */
 body::after {
   content: "";
   position: fixed;
-  bottom: 12px;
-  right: 12px;
-  width: 80px;
-  height: 33px;
-  background: url("/public/powered-by-aws.png") no-repeat center/contain;
-  opacity: 0.8;
+  bottom: 8px;
+  right: 8px;
+  width: 100px;
+  height: 45px;
+  background:
+    url("/public/powered-by-aws.png") no-repeat center/60px auto,
+    radial-gradient(ellipse at center, rgba(255,255,255,0.08) 0%, transparent 70%);
+  opacity: 0.6;
   z-index: 50;
   pointer-events: none;
   filter: invert(0.85) brightness(1.5);
+  border-radius: 8px;
 }
