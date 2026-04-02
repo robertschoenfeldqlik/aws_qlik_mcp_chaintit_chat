@@ -113,3 +113,80 @@ body::after {
   pointer-events: none;
   border-radius: 8px;
 }
+
+/* ---------------------------------------------------------------------------
+   Responsive — Mobile & Tablet
+   --------------------------------------------------------------------------- */
+
+/* Tablet (768px and below) */
+@media (max-width: 768px) {
+  header img {
+    max-height: 30px !important;
+  }
+
+  /* Welcome logo smaller on tablet */
+  [data-testid="assistant-message"] img {
+    max-height: 100px !important;
+  }
+
+  /* AWS badge smaller */
+  body::after {
+    width: 80px;
+    height: 36px;
+    background-size: 50px auto, 100% 100%;
+  }
+}
+
+/* Mobile (480px and below) */
+@media (max-width: 480px) {
+  header img {
+    max-height: 24px !important;
+  }
+
+  /* Welcome logo compact */
+  [data-testid="assistant-message"] img {
+    max-height: 70px !important;
+  }
+
+  /* Smaller fonts for messages */
+  [data-testid="assistant-message"],
+  [data-testid="user-message"] {
+    font-size: 14px !important;
+  }
+
+  /* Settings sidebar full width on mobile */
+  [data-testid="chat-settings"] {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* AWS badge even smaller */
+  body::after {
+    width: 60px;
+    height: 28px;
+    background-size: 40px auto, 100% 100%;
+    bottom: 4px;
+    right: 4px;
+  }
+
+  /* Tighter message padding */
+  .prose {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
+/* Small mobile (360px and below) */
+@media (max-width: 360px) {
+  header img {
+    max-height: 20px !important;
+  }
+
+  [data-testid="assistant-message"] img {
+    max-height: 50px !important;
+  }
+
+  body::after {
+    display: none;
+  }
+}
