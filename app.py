@@ -77,10 +77,16 @@ def get_chat_model(model_id, region, temperature, max_tokens, api_key=""):
 async def connect_qlik_mcp(tenant_url: str, access_token: str):
     """Connect to Qlik MCP using a Bearer token from OAuth."""
     mcp_url = f"{tenant_url.rstrip('/')}/api/ai/mcp"
+    logger.info(f"Connecting to MCP: {mcp_url} (token: {access_token[:20]}...)")
     mcp_client = MultiServerMCPClient({
         "qlik": {"url": mcp_url, "transport": "sse", "headers": {"Authorization": f"Bearer {access_token}"}},
     })
-    tools = await mcp_client.get_tools()
+    try:
+        tools = await mcp_client.get_tools()
+    except ExceptionGroup as eg:
+        # Unwrap the exception group to get the real error
+        msgs = [f"{type(e).__name__}: {e}" for e in eg.exceptions]
+        raise RuntimeError("; ".join(msgs)) from eg
     return mcp_client, tools
 
 
