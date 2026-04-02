@@ -106,8 +106,8 @@ body::after {
   height: 50px;
   background:
     url("/public/powered-by-aws.png") no-repeat center/70px auto,
-    radial-gradient(ellipse at center, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 50%, transparent 75%);
-  opacity: 0.9;
+    radial-gradient(ellipse at center, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.35) 40%, rgba(255,255,255,0.1) 65%, transparent 85%);
+  opacity: 0.95;
   z-index: 50;
   pointer-events: none;
   border-radius: 8px;
