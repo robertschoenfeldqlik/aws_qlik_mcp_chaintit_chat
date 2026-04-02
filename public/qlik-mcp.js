@@ -144,8 +144,19 @@
       pollForCompletion(state, closeDialog);
     };
 
-    // Focus the first input
-    setTimeout(() => urlInput.focus(), 100);
+    // Load defaults from server if fields are empty
+    if (!urlInput.value || !cidInput.value) {
+      fetch("/auth/qlik/defaults").then(r => r.json()).then(d => {
+        if (d.tenant_url && !urlInput.value) urlInput.value = d.tenant_url;
+        if (d.client_id && !cidInput.value) cidInput.value = d.client_id;
+      }).catch(() => {});
+    }
+
+    // Focus the first empty input
+    setTimeout(() => {
+      if (!urlInput.value) urlInput.focus();
+      else if (!cidInput.value) cidInput.focus();
+    }, 150);
   }
 
   async function pollForCompletion(state, closeDialog) {
@@ -155,21 +166,18 @@
         const resp = await fetch("/auth/qlik/status?state=" + encodeURIComponent(state));
         const data = await resp.json();
         if (data.complete && data.access_token) {
+          // Store the token server-side via POST
+          await fetch("/auth/qlik/connect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              access_token: data.access_token,
+              tenant_url: data.tenant_url,
+              client_id: data.client_id,
+              session_id: "default",
+            }),
+          });
           closeDialog();
-          // Send a special message through the chat to trigger MCP connection
-          // Find the chat input, set the value, and submit
-          const input = document.querySelector('textarea[placeholder*="Type your message"]');
-          if (input) {
-            const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-            nativeSetter.call(input, "/connect_qlik " + data.access_token + " " + data.tenant_url + " " + data.client_id);
-            input.dispatchEvent(new Event("input", { bubbles: true }));
-            // Find and click send button
-            await new Promise((r) => setTimeout(r, 200));
-            const sendBtn = input.closest("form")?.querySelector('button[type="submit"]')
-              || document.querySelector('button[data-testid="send-button"]')
-              || input.parentElement?.parentElement?.querySelector("button:last-of-type");
-            if (sendBtn) sendBtn.click();
-          }
           return;
         }
       } catch (e) {}

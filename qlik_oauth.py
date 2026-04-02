@@ -42,8 +42,12 @@ class PendingOAuth:
 # Pending flows keyed by state token
 pending_flows: dict[str, PendingOAuth] = {}
 
-# Completed flows: state -> access_token (polled by app.py)
+# Completed flows: state -> access_token (polled by JS)
 completed_tokens: dict[str, dict] = {}
+
+# Pending MCP connections: session_id -> {access_token, tenant_url, client_id}
+# Written by /auth/qlik/connect, read by app.py on_message
+pending_connections: dict[str, dict] = {}
 
 
 def cleanup():
@@ -75,6 +79,41 @@ def register_oauth_routes(app):
                 "client_id": token_data["client_id"],
             })
         return JSONResponse({"complete": False})
+
+    @oauth_router.get("/auth/qlik/defaults")
+    async def defaults(request: Request):
+        """Returns default Qlik credentials from env vars for the JS form."""
+        from fastapi.responses import JSONResponse
+        return JSONResponse({
+            "tenant_url": os.getenv("QLIK_TENANT_URL", ""),
+            "client_id": os.getenv("QLIK_OAUTH_CLIENT_ID", ""),
+        })
+
+    @oauth_router.post("/auth/qlik/connect")
+    async def connect(request: Request):
+        """Called by JS after OAuth completes. Stores token for the session to pick up."""
+        from fastapi.responses import JSONResponse
+        try:
+            body = await request.json()
+            access_token = body.get("access_token", "")
+            tenant_url = body.get("tenant_url", "")
+            client_id = body.get("client_id", "")
+            session_id = body.get("session_id", "")
+
+            if not access_token or not tenant_url:
+                return JSONResponse({"error": "Missing token or tenant_url"}, 400)
+
+            # Store in pending_connections for the app to pick up
+            pending_connections[session_id or "default"] = {
+                "access_token": access_token,
+                "tenant_url": tenant_url,
+                "client_id": client_id,
+            }
+            logger.info(f"Stored pending MCP connection for session {session_id[:8] if session_id else 'default'}...")
+            return JSONResponse({"ok": True})
+        except Exception as e:
+            logger.error(f"Connect endpoint error: {e}")
+            return JSONResponse({"error": str(e)}, 500)
 
     @oauth_router.get("/auth/qlik/start")
     async def start(request: Request):

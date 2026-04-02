@@ -25,7 +25,7 @@ from botocore.config import Config
 from dotenv import load_dotenv
 from typing import cast
 
-from qlik_oauth import register_oauth_routes, completed_tokens
+from qlik_oauth import register_oauth_routes, completed_tokens, pending_connections
 
 load_dotenv()
 
@@ -80,20 +80,15 @@ async def connect_qlik_mcp(tenant_url: str, access_token: str):
     mcp_client = MultiServerMCPClient({
         "qlik": {"url": mcp_url, "transport": "sse", "headers": {"Authorization": f"Bearer {access_token}"}},
     })
-    await mcp_client.__aenter__()
-    return mcp_client, mcp_client.get_tools()
+    tools = await mcp_client.get_tools()
+    return mcp_client, tools
 
 
 async def disconnect_qlik_mcp():
-    mcp_client = cl.user_session.get("mcp_client")
-    if mcp_client:
-        try:
-            await mcp_client.__aexit__(None, None, None)
-        except Exception:
-            pass
-        cl.user_session.set("mcp_client", None)
-        cl.user_session.set("mcp_tools", None)
-        cl.user_session.set("agent", None)
+    """Safely disconnect from Qlik MCP."""
+    cl.user_session.set("mcp_client", None)
+    cl.user_session.set("mcp_tools", None)
+    cl.user_session.set("agent", None)
 
 
 def build_agent_if_ready():
@@ -323,29 +318,31 @@ async def on_settings_update(settings: dict):
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    # Handle /connect_qlik command from JS OAuth flow
-    if message.content.startswith("/connect_qlik "):
-        parts = message.content.split(" ", 3)
-        if len(parts) >= 4:
-            access_token, tenant_url, client_id = parts[1], parts[2], parts[3]
-            cl.user_session.set("qlik_access_token", access_token)
-            cl.user_session.set("qlik_tenant_url", tenant_url)
-            cl.user_session.set("qlik_client_id", client_id)
-            try:
-                await disconnect_qlik_mcp()
-                mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
-                cl.user_session.set("mcp_client", mcp_client)
-                cl.user_session.set("mcp_tools", tools)
-                build_agent_if_ready()
-                tool_names = [t.name for t in tools]
-                actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Reconnect", payload={})]
-                await cl.Message(
-                    content=f"Connected to Qlik MCP with **{len(tools)} tools**:\n" + "\n".join(f"- `{n}`" for n in tool_names),
-                    actions=actions,
-                ).send()
-            except Exception as e:
-                await cl.Message(content=f"Qlik MCP connection failed:\n```\n{e}\n```").send()
-        return
+    # Check if there's a pending MCP connection from OAuth
+    pending = pending_connections.pop("default", None)
+    if pending:
+        access_token = pending["access_token"]
+        tenant_url = pending["tenant_url"]
+        client_id = pending["client_id"]
+        cl.user_session.set("qlik_access_token", access_token)
+        cl.user_session.set("qlik_tenant_url", tenant_url)
+        cl.user_session.set("qlik_client_id", client_id)
+        try:
+            await disconnect_qlik_mcp()
+            mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
+            cl.user_session.set("mcp_client", mcp_client)
+            cl.user_session.set("mcp_tools", tools)
+            build_agent_if_ready()
+            tool_names = [t.name for t in tools]
+            actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Reconnect", payload={})]
+            await cl.Message(
+                content=f"Connected to Qlik MCP with **{len(tools)} tools**:\n" + "\n".join(f"- `{n}`" for n in tool_names),
+                actions=actions,
+            ).send()
+        except Exception as e:
+            logger.error(f"MCP connection failed: {e}")
+            await cl.Message(content=f"Qlik MCP connection failed:\n```\n{e}\n```").send()
+        # Don't return — still process the user's message with the now-connected agent
 
     agent = cast(CompiledStateGraph | None, cl.user_session.get("agent"))
 
