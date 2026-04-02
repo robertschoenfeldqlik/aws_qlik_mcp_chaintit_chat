@@ -349,18 +349,18 @@ async def on_settings_update(settings: dict):
     """Handle settings changes — reconnect MCP and/or rebuild model."""
     # Extract settings
     # AWS settings
-    access_key = settings.get("aws_access_key_id", "").strip()
-    secret_key = settings.get("aws_secret_access_key", "").strip()
-    model_name = settings.get("bedrock_model", "Claude 3.7 Sonnet")
+    access_key = (settings.get("aws_access_key_id") or "").strip()
+    secret_key = (settings.get("aws_secret_access_key") or "").strip()
+    model_name = settings.get("bedrock_model") or "Claude 3.7 Sonnet"
     model_id = BEDROCK_MODELS[model_name]
-    region = settings.get("aws_region", "us-west-2")
-    temperature = settings.get("temperature", 0.7)
-    max_tokens = int(settings.get("max_tokens", 4096))
+    region = settings.get("aws_region") or "us-west-2"
+    temperature = settings.get("temperature") or 0.7
+    max_tokens = int(settings.get("max_tokens") or 4096)
 
     # Qlik settings
-    tenant_url = settings.get("qlik_tenant_url", "").strip()
-    client_id = settings.get("qlik_client_id", "").strip()
-    client_secret = settings.get("qlik_client_secret", "").strip()
+    tenant_url = (settings.get("qlik_tenant_url") or "").strip()
+    client_id = (settings.get("qlik_client_id") or "").strip()
+    client_secret = (settings.get("qlik_client_secret") or "").strip()
 
     # Update Bedrock model with credentials
     chat_model = get_chat_model(model_id, region, temperature, max_tokens, access_key, secret_key)
