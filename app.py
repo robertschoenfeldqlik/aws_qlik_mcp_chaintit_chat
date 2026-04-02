@@ -172,7 +172,7 @@ async def poll_for_oauth_and_connect():
                     cl.user_session.set("mcp_tools", tools)
                     build_agent_if_ready()
                     tool_names = [t.name for t in tools]
-                    actions = [cl.Action(name="reconnect_qlik", label="Reconnect to Qlik", description="Re-establish Qlik MCP connection", payload={})]
+                    actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Re-establish Qlik MCP connection", payload={})]
                     await cl.Message(
                         content=f"Authenticated! Connected to Qlik MCP with **{len(tools)} tools**:\n"
                         + "\n".join(f"- `{n}`" for n in tool_names),
@@ -210,7 +210,7 @@ async def on_reconnect_qlik(action: cl.Action):
         cl.user_session.set("mcp_tools", tools)
         build_agent_if_ready()
         tool_names = [t.name for t in tools]
-        actions = [cl.Action(name="reconnect_qlik", label="Reconnect to Qlik", description="Re-establish Qlik MCP connection", payload={})]
+        actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Re-establish Qlik MCP connection", payload={})]
         await cl.Message(
             content=f"Reconnected! **{len(tools)} tools** available:\n" + "\n".join(f"- `{n}`" for n in tool_names),
             actions=actions,
@@ -293,8 +293,9 @@ async def on_message(message: cl.Message):
             from langchain_core.messages import HumanMessage
             resp = await chat_model.ainvoke([HumanMessage(content=message.content)])
             text = resp.content if isinstance(resp.content, str) else str(resp.content)
-            text += "\n\n---\n*No Qlik MCP connected. Click the **plug icon** to access your Qlik data.*"
-            await cl.Message(content=text).send()
+            text += "\n\n---\n*No Qlik MCP connected.*"
+            actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Connect or reconnect to Qlik MCP", payload={})]
+            await cl.Message(content=text, actions=actions).send()
         except Exception as e:
             await cl.Message(content=f"LLM Error: {str(e)}").send()
             logger.error(tb.format_exc())
@@ -333,7 +334,7 @@ async def on_message(message: cl.Message):
                     return
                 except Exception:
                     pass
-            actions = [cl.Action(name="reconnect_qlik", label="Reconnect to Qlik", description="Re-establish connection", payload={})]
+            actions = [cl.Action(name="reconnect_qlik", label="Refresh Qlik MCP", description="Re-establish connection", payload={})]
             await cl.Message(content="Connection lost.", actions=actions).send()
         else:
             await cl.Message(content=f"Error: {str(e)}").send()
