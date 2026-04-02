@@ -101,13 +101,13 @@ body::after {
   content: "";
   position: fixed;
   bottom: 8px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 8px;
   width: 110px;
   height: 50px;
-  background:
-    url("/public/powered-by-aws.png") no-repeat center/70px auto,
-    radial-gradient(ellipse at center, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.5) 40%, rgba(255,255,255,0.2) 65%, transparent 85%);
+  background-image: url("/public/powered-by-aws.png"), radial-gradient(circle at 50% 50%, rgba(255,255,255,0.7) 0%, rgba(255,255,255,0.5) 40%, rgba(255,255,255,0.2) 65%, transparent 85%);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: 70px auto, 100% 100%;
   opacity: 0.95;
   z-index: 50;
   pointer-events: none;
