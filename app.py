@@ -48,6 +48,8 @@ SYSTEM_PROMPT = (
     "If you're unsure about available data, use the tools to explore what's available first."
 )
 
+QLIK_MCP_HELP_URL = "https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm"
+
 
 def get_bedrock_client(region: str):
     """Create a Bedrock runtime client."""
@@ -73,19 +75,23 @@ def get_chat_model(model_id: str, region: str, temperature: float, max_tokens: i
     )
 
 
-async def connect_qlik_mcp(tenant_url: str, api_key: str, app_id: str):
-    """Connect to Qlik MCP server and return tools. Handles both native and community servers."""
-    # Use Qlik's native remote MCP endpoint (SSE)
+async def connect_qlik_mcp(tenant_url: str, client_id: str, client_secret: str):
+    """Connect to Qlik MCP server via SSE using OAuth credentials.
+
+    See: https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm
+    """
     mcp_url = f"{tenant_url.rstrip('/')}/api/ai/mcp"
+
+    headers = {"X-Qlik-OAuth-Client-Id": client_id}
+    if client_secret:
+        headers["X-Qlik-OAuth-Client-Secret"] = client_secret
 
     mcp_client = MultiServerMCPClient(
         {
             "qlik": {
                 "url": mcp_url,
                 "transport": "sse",
-                "headers": {
-                    "Authorization": f"Bearer {api_key}",
-                },
+                "headers": headers,
             }
         }
     )
@@ -115,15 +121,15 @@ async def ensure_mcp_connected():
 
     # Try to reconnect using saved settings
     tenant_url = cl.user_session.get("qlik_tenant_url")
-    api_key = cl.user_session.get("qlik_api_key")
-    app_id = cl.user_session.get("qlik_app_id")
+    client_id = cl.user_session.get("qlik_client_id")
+    client_secret = cl.user_session.get("qlik_client_secret")
 
-    if not tenant_url or not api_key:
+    if not tenant_url or not client_id:
         return False
 
     try:
         await disconnect_qlik_mcp()
-        mcp_client, tools = await connect_qlik_mcp(tenant_url, api_key, app_id)
+        mcp_client, tools = await connect_qlik_mcp(tenant_url, client_id, client_secret)
         chat_model = cl.user_session.get("chat_model")
         agent = create_react_agent(chat_model, tools, prompt=SYSTEM_PROMPT)
 
@@ -184,32 +190,33 @@ async def on_chat_start():
     """Initialize chat session with settings panel."""
     default_region = os.getenv("AWS_DEFAULT_REGION", "us-west-2")
     default_tenant = os.getenv("QLIK_TENANT_URL", "")
-    default_api_key = os.getenv("QLIK_API_KEY", "")
-    default_app_id = os.getenv("QLIK_APP_ID", "")
+    default_client_id = os.getenv("QLIK_OAUTH_CLIENT_ID", "")
+    default_client_secret = os.getenv("QLIK_OAUTH_CLIENT_SECRET", "")
 
     settings = cl.ChatSettings(
         [
             # --- Qlik MCP Settings ---
+            # See: https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm
             TextInput(
                 id="qlik_tenant_url",
                 label="Qlik Tenant URL",
                 initial=default_tenant,
                 placeholder="https://your-tenant.us.qlikcloud.com",
-                description="Your Qlik Cloud tenant URL",
+                description="Your Qlik Cloud tenant URL (MCP endpoint: <tenant>/api/ai/mcp)",
             ),
             TextInput(
-                id="qlik_api_key",
-                label="Qlik API Key",
-                initial=default_api_key,
-                placeholder="your-api-key",
-                description="API key for Qlik Cloud authentication",
+                id="qlik_client_id",
+                label="OAuth Client ID",
+                initial=default_client_id,
+                placeholder="Your OAuth client ID",
+                description="OAuth client ID created by your Qlik tenant admin (scopes: user_default, mcp:execute)",
             ),
             TextInput(
-                id="qlik_app_id",
-                label="Qlik App ID",
-                initial=default_app_id,
-                placeholder="your-app-id (optional)",
-                description="Specific Qlik app to connect to",
+                id="qlik_client_secret",
+                label="OAuth Client Secret",
+                initial=default_client_secret,
+                placeholder="Leave empty if not required",
+                description="OAuth client secret (leave empty for most configurations)",
             ),
             # --- Bedrock Settings ---
             Select(
@@ -255,12 +262,12 @@ async def on_chat_start():
     cl.user_session.set("chat_messages", [])
 
     # Auto-connect to Qlik MCP if env vars are set
-    if default_tenant and default_api_key:
+    if default_tenant and default_client_id:
         cl.user_session.set("qlik_tenant_url", default_tenant)
-        cl.user_session.set("qlik_api_key", default_api_key)
-        cl.user_session.set("qlik_app_id", default_app_id)
+        cl.user_session.set("qlik_client_id", default_client_id)
+        cl.user_session.set("qlik_client_secret", default_client_secret)
         try:
-            mcp_client, tools = await connect_qlik_mcp(default_tenant, default_api_key, default_app_id)
+            mcp_client, tools = await connect_qlik_mcp(default_tenant, default_client_id, default_client_secret)
             cl.user_session.set("mcp_client", mcp_client)
             cl.user_session.set("mcp_tools", tools)
             build_agent_if_ready()
@@ -281,7 +288,8 @@ async def on_chat_start():
                 content=(
                     f"**Qlik AI Assistant** ready, but auto-connect to Qlik MCP failed:\n"
                     f"```\n{str(e)}\n```\n\n"
-                    "Open **Settings** (gear icon) to configure your Qlik tenant URL and API key, then click Confirm."
+                    f"Open **Settings** (gear icon) to configure your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
+                    f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
                 )
             ).send()
             return
@@ -290,10 +298,11 @@ async def on_chat_start():
         content=(
             "**Qlik AI Assistant** ready.\n\n"
             "1. Open **Settings** (gear icon)\n"
-            "2. Enter your **Qlik Tenant URL** and **API Key**\n"
-            "3. Optionally configure the **Bedrock model** and **region**\n"
-            "4. Click **Confirm** to connect\n\n"
-            "The assistant will automatically connect to your Qlik MCP server."
+            "2. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
+            "3. Optionally enter the **OAuth Client Secret** (leave empty if not required)\n"
+            "4. Configure the **Bedrock model** and **region**\n"
+            "5. Click **Confirm** to connect\n\n"
+            f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
         )
     ).send()
 
@@ -309,8 +318,8 @@ async def on_settings_update(settings: dict):
     max_tokens = int(settings.get("max_tokens", 4096))
 
     tenant_url = settings.get("qlik_tenant_url", "").strip()
-    api_key = settings.get("qlik_api_key", "").strip()
-    app_id = settings.get("qlik_app_id", "").strip()
+    client_id = settings.get("qlik_client_id", "").strip()
+    client_secret = settings.get("qlik_client_secret", "").strip()
 
     # Update Bedrock model
     chat_model = get_chat_model(model_id, region, temperature, max_tokens)
@@ -318,21 +327,21 @@ async def on_settings_update(settings: dict):
 
     # Check if Qlik settings changed
     old_tenant = cl.user_session.get("qlik_tenant_url", "")
-    old_key = cl.user_session.get("qlik_api_key", "")
-    old_app = cl.user_session.get("qlik_app_id", "")
+    old_id = cl.user_session.get("qlik_client_id", "")
+    old_secret = cl.user_session.get("qlik_client_secret", "")
 
-    qlik_changed = (tenant_url != old_tenant or api_key != old_key or app_id != old_app)
+    qlik_changed = (tenant_url != old_tenant or client_id != old_id or client_secret != old_secret)
 
     # Save Qlik settings
     cl.user_session.set("qlik_tenant_url", tenant_url)
-    cl.user_session.set("qlik_api_key", api_key)
-    cl.user_session.set("qlik_app_id", app_id)
+    cl.user_session.set("qlik_client_id", client_id)
+    cl.user_session.set("qlik_client_secret", client_secret)
 
     # Reconnect MCP if Qlik settings changed
-    if qlik_changed and tenant_url and api_key:
+    if qlik_changed and tenant_url and client_id:
         await disconnect_qlik_mcp()
         try:
-            mcp_client, tools = await connect_qlik_mcp(tenant_url, api_key, app_id)
+            mcp_client, tools = await connect_qlik_mcp(tenant_url, client_id, client_secret)
             cl.user_session.set("mcp_client", mcp_client)
             cl.user_session.set("mcp_tools", tools)
             build_agent_if_ready()
@@ -375,7 +384,8 @@ async def on_message(message: cl.Message):
             await cl.Message(
                 content=(
                     "Not connected to Qlik MCP. Open **Settings** (gear icon) "
-                    "to enter your Qlik Tenant URL and API Key, then click Confirm."
+                    "to enter your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
+                    f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
                 )
             ).send()
             return
