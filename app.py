@@ -45,18 +45,20 @@ BEDROCK_MODELS = {
 AWS_REGIONS = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1", "ap-northeast-1"]
 
 SYSTEM_PROMPT = (
-    "You are a Qlik Cloud MCP tool-calling agent. ALWAYS call tools to answer questions. "
-    "Do NOT guess or make up answers — use the tools.\n\n"
-    "IMPORTANT TOOL USAGE RULES:\n"
-    "- qlik_search: requires 'query' (string) parameter. Example: qlik_search(query='*', resourceType='app')\n"
-    "- qlik_describe_app: requires 'appId' parameter\n"
-    "- qlik_list_sheets: requires 'appId' parameter\n"
-    "- To find apps: qlik_search(query='*', resourceType='app')\n"
-    "- To find data products: qlik_search(query='*', resourceType='dataproduct')\n"
-    "- To find spaces: qlik_search_spaces(query='*') or qlik_search(query='*', resourceType='space')\n"
+    "You are a Qlik Cloud tool-calling agent. Do NOT think or reason. IMMEDIATELY call a tool.\n\n"
+    "IMPORTANT: You have NO internal knowledge about Qlik. You MUST call a tool for every question. "
+    "Do NOT write text before calling a tool. Do NOT list tool names. Do NOT explain what you will do. "
+    "JUST CALL THE TOOL.\n\n"
+    "TOOL USAGE:\n"
+    "- qlik_search(query='*', resourceType='app') — find apps\n"
+    "- qlik_search(query='*', resourceType='dataproduct') — find data products\n"
+    "- qlik_search(query='*', resourceType='space') — find spaces\n"
+    "- qlik_search(query='*', resourceType='dataset') — find datasets\n"
+    "- qlik_describe_app(appId='...') — get app details (needs app ID from search)\n"
+    "- qlik_list_sheets(appId='...') — list sheets (needs app ID)\n"
     "- To find an ID: call qlik_search first, then use the ID in follow-up calls.\n"
-    "- ALL search tools require a 'query' parameter — use '*' to match everything.\n\n"
-    "Present results with counts and bullet points. If empty, say 'No results found.'"
+    "- ALL search calls require query='*' or a search term.\n\n"
+    "NEVER list tool names. NEVER explain. JUST CALL THE TOOL IMMEDIATELY."
 )
 
 QLIK_MCP_HELP_URL = "https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm"
@@ -136,7 +138,7 @@ async def on_chat_start():
                description="Must match the region where you generated the API key"),
         Select(id="bedrock_model", label="Bedrock Model", values=list(BEDROCK_MODELS.keys()),
                initial_value="Meta Llama 3.3 70B", description="Select the foundation model to use"),
-        Slider(id="temperature", label="Temperature", initial=0.7, min=0.0, max=1.0, step=0.1,
+        Slider(id="temperature", label="Temperature", initial=0.2, min=0.0, max=1.0, step=0.1,
                description="Controls randomness in responses"),
         Slider(id="max_tokens", label="Max Tokens", initial=4096, min=256, max=32768, step=256,
                description="Maximum response length"),
@@ -144,7 +146,7 @@ async def on_chat_start():
     await settings.send()
 
     model_id = BEDROCK_MODELS["Meta Llama 3.3 70B"]
-    chat_model = get_chat_model(model_id, default_region, 0.7, 4096, default_api_key)
+    chat_model = get_chat_model(model_id, default_region, 0.2, 4096, default_api_key)
     cl.user_session.set("chat_model", chat_model)
 
     await cl.Message(
@@ -162,7 +164,7 @@ async def on_settings_update(settings: dict):
     model_name = settings.get("bedrock_model") or "Meta Llama 3.3 70B"
     model_id = BEDROCK_MODELS[model_name]
     region = settings.get("aws_region") or "us-east-1"
-    temperature = settings.get("temperature") or 0.7
+    temperature = settings.get("temperature") or 0.2
     max_tokens = int(settings.get("max_tokens") or 4096)
 
     chat_model = get_chat_model(model_id, region, temperature, max_tokens, api_key)
