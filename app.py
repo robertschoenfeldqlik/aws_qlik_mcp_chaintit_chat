@@ -1,16 +1,21 @@
-"""Chainlit chat app with AWS Bedrock LLM and Qlik MCP integration."""
+"""Chainlit chat app with AWS Bedrock LLM and Qlik MCP integration.
 
+Uses OAuth Authorization Code + PKCE to authenticate with Qlik Cloud.
+"""
+
+import asyncio
 import os
 import sys
 import traceback as tb
+import urllib.parse
 
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, TextInput
+from chainlit.server import app as fastapi_app
 from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_core.messages import AIMessageChunk
 from langchain_core.runnables import RunnableConfig
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.tools import load_mcp_tools
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
@@ -20,10 +25,20 @@ from botocore.config import Config
 from dotenv import load_dotenv
 from typing import cast
 
+from qlik_oauth import (
+    QlikTokens,
+    is_token_valid,
+    refresh_access_token,
+    register_oauth_routes,
+)
+
 load_dotenv()
 
 logger.remove()
 logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
+
+# Register OAuth routes on Chainlit's FastAPI app
+register_oauth_routes(fastapi_app)
 
 # Available Bedrock models
 BEDROCK_MODELS = {
@@ -51,6 +66,11 @@ SYSTEM_PROMPT = (
 QLIK_MCP_HELP_URL = "https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm"
 
 
+# ---------------------------------------------------------------------------
+# AWS Bedrock Helpers
+# ---------------------------------------------------------------------------
+
+
 def get_bedrock_client(region: str, access_key: str = "", secret_key: str = ""):
     """Create a Bedrock runtime client with optional explicit credentials."""
     kwargs = {
@@ -61,11 +81,9 @@ def get_bedrock_client(region: str, access_key: str = "", secret_key: str = ""):
             read_timeout=60,
         ),
     }
-    # Use explicit credentials if provided, otherwise fall back to env/IAM role
     if access_key and secret_key:
         kwargs["aws_access_key_id"] = access_key
         kwargs["aws_secret_access_key"] = secret_key
-
     return boto3.client(**kwargs)
 
 
@@ -88,23 +106,21 @@ def get_chat_model(
     )
 
 
-async def connect_qlik_mcp(tenant_url: str, client_id: str, client_secret: str):
-    """Connect to Qlik MCP server via SSE using OAuth credentials.
+# ---------------------------------------------------------------------------
+# Qlik MCP Connection
+# ---------------------------------------------------------------------------
 
-    See: https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm
-    """
+
+async def connect_qlik_mcp(tenant_url: str, access_token: str):
+    """Connect to Qlik MCP server via SSE using an OAuth Bearer token."""
     mcp_url = f"{tenant_url.rstrip('/')}/api/ai/mcp"
-
-    headers = {"X-Qlik-OAuth-Client-Id": client_id}
-    if client_secret:
-        headers["X-Qlik-OAuth-Client-Secret"] = client_secret
 
     mcp_client = MultiServerMCPClient(
         {
             "qlik": {
                 "url": mcp_url,
                 "transport": "sse",
-                "headers": headers,
+                "headers": {"Authorization": f"Bearer {access_token}"},
             }
         }
     )
@@ -130,19 +146,40 @@ async def ensure_mcp_connected():
     """Check MCP connection and reconnect if needed. Returns True if connected."""
     agent = cl.user_session.get("agent")
     if agent:
+        # Check token validity
+        tokens: QlikTokens | None = cl.user_session.get("qlik_tokens")
+        if tokens and not is_token_valid(tokens):
+            new_tokens = await refresh_access_token(tokens)
+            if new_tokens:
+                cl.user_session.set("qlik_tokens", new_tokens)
+                await disconnect_qlik_mcp()
+                mcp_client, tools = await connect_qlik_mcp(
+                    new_tokens.tenant_url, new_tokens.access_token
+                )
+                cl.user_session.set("mcp_client", mcp_client)
+                cl.user_session.set("mcp_tools", tools)
+                build_agent_if_ready()
+                return True
+            else:
+                cl.user_session.set("agent", None)
+                return False
         return True
 
-    # Try to reconnect using saved settings
-    tenant_url = cl.user_session.get("qlik_tenant_url")
-    client_id = cl.user_session.get("qlik_client_id")
-    client_secret = cl.user_session.get("qlik_client_secret")
-
-    if not tenant_url or not client_id:
+    # Try to reconnect using saved tokens
+    tokens = cl.user_session.get("qlik_tokens")
+    if not tokens:
         return False
+
+    if not is_token_valid(tokens):
+        new_tokens = await refresh_access_token(tokens)
+        if not new_tokens:
+            return False
+        tokens = new_tokens
+        cl.user_session.set("qlik_tokens", tokens)
 
     try:
         await disconnect_qlik_mcp()
-        mcp_client, tools = await connect_qlik_mcp(tenant_url, client_id, client_secret)
+        mcp_client, tools = await connect_qlik_mcp(tokens.tenant_url, tokens.access_token)
         chat_model = cl.user_session.get("chat_model")
         agent = create_react_agent(chat_model, tools, prompt=SYSTEM_PROMPT)
 
@@ -150,7 +187,9 @@ async def ensure_mcp_connected():
         cl.user_session.set("mcp_tools", tools)
         cl.user_session.set("agent", agent)
 
-        await cl.Message(content=f"Back in action! Reconnected to Qlik MCP with **{len(tools)} tools** available.").send()
+        await cl.Message(
+            content=f"Back in action! Reconnected to Qlik MCP with **{len(tools)} tools** available."
+        ).send()
         return True
     except Exception as e:
         logger.error(f"Reconnection failed: {e}")
@@ -169,13 +208,34 @@ def build_agent_if_ready():
     return None
 
 
+# ---------------------------------------------------------------------------
+# UI Helpers
+# ---------------------------------------------------------------------------
+
+
+async def send_connect_button():
+    """Send a message with the Connect to Qlik button."""
+    actions = [
+        cl.Action(
+            name="connect_qlik",
+            label="Connect to Qlik Cloud",
+            description="Authenticate with Qlik Cloud via OAuth",
+            payload={},
+        )
+    ]
+    await cl.Message(
+        content="Click the button below to authenticate with Qlik Cloud.",
+        actions=actions,
+    ).send()
+
+
 async def send_reconnect_button():
     """Send a message with a Reconnect button."""
     actions = [
         cl.Action(
-            name="reconnect_mcp",
-            label="Reconnect to Qlik MCP",
-            description="Re-establish the connection to Qlik MCP server",
+            name="connect_qlik",
+            label="Reconnect to Qlik Cloud",
+            description="Re-authenticate with Qlik Cloud",
             payload={},
         )
     ]
@@ -185,17 +245,92 @@ async def send_reconnect_button():
     ).send()
 
 
-@cl.action_callback("reconnect_mcp")
-async def on_reconnect_action(action: cl.Action):
-    """Handle the Reconnect button click."""
-    await cl.Message(content="Reconnecting to Qlik MCP...").send()
-    await disconnect_qlik_mcp()
-    connected = await ensure_mcp_connected()
-    if not connected:
+# ---------------------------------------------------------------------------
+# Action Callbacks
+# ---------------------------------------------------------------------------
+
+
+@cl.action_callback("connect_qlik")
+async def on_connect_qlik(action: cl.Action):
+    """Handle the Connect to Qlik button — initiate OAuth PKCE flow."""
+    tenant_url = cl.user_session.get("qlik_tenant_url")
+    client_id = cl.user_session.get("qlik_client_id")
+
+    if not tenant_url or not client_id:
         await cl.Message(
-            content="Reconnection failed. Check your Qlik settings (gear icon) and try again."
+            content="Please set **Qlik Tenant URL** and **OAuth Client ID** in Settings first."
+        ).send()
+        return
+
+    session_id = cl.context.session.id
+    base_url = os.getenv("APP_BASE_URL", "http://localhost:8000")
+
+    oauth_url = (
+        f"{base_url}/auth/qlik/start?"
+        + urllib.parse.urlencode({
+            "session_id": session_id,
+            "tenant_url": tenant_url,
+            "client_id": client_id,
+        })
+    )
+
+    cl.user_session.set("oauth_complete", False)
+    cl.user_session.set("oauth_error", None)
+
+    await cl.Message(
+        content=(
+            f"**[Click here to sign in to Qlik Cloud]({oauth_url})**\n\n"
+            "_Waiting for authentication..._"
+        )
+    ).send()
+
+    # Poll for OAuth completion (max 120 seconds)
+    for _ in range(60):
+        await asyncio.sleep(2)
+        if cl.user_session.get("oauth_complete"):
+            break
+
+    if not cl.user_session.get("oauth_complete"):
+        await cl.Message(content="Authentication timed out. Please try again.").send()
+        await send_connect_button()
+        return
+
+    # OAuth succeeded — connect MCP with the Bearer token
+    tokens: QlikTokens = cl.user_session.get("qlik_tokens")
+
+    try:
+        await disconnect_qlik_mcp()
+        mcp_client, tools = await connect_qlik_mcp(tenant_url, tokens.access_token)
+        cl.user_session.set("mcp_client", mcp_client)
+        cl.user_session.set("mcp_tools", tools)
+        build_agent_if_ready()
+
+        tool_names = [t.name for t in tools]
+        actions = [
+            cl.Action(
+                name="connect_qlik",
+                label="Reconnect to Qlik Cloud",
+                description="Re-authenticate with Qlik Cloud",
+                payload={},
+            )
+        ]
+        await cl.Message(
+            content=(
+                f"Authenticated! Connected to Qlik MCP with **{len(tools)} tools**:\n"
+                + "\n".join(f"- `{name}`" for name in tool_names)
+            ),
+            actions=actions,
+        ).send()
+    except Exception as e:
+        await cl.Message(
+            content=f"Authenticated with Qlik but MCP connection failed:\n```\n{str(e)}\n```"
         ).send()
         await send_reconnect_button()
+
+
+# ---------------------------------------------------------------------------
+# Chat Lifecycle
+# ---------------------------------------------------------------------------
 
 
 @cl.on_chat_start
@@ -206,32 +341,23 @@ async def on_chat_start():
     default_secret_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
     default_tenant = os.getenv("QLIK_TENANT_URL", "")
     default_client_id = os.getenv("QLIK_OAUTH_CLIENT_ID", "")
-    default_client_secret = os.getenv("QLIK_OAUTH_CLIENT_SECRET", "")
 
     settings = cl.ChatSettings(
         [
             # --- Qlik MCP Settings ---
-            # See: https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm
             TextInput(
                 id="qlik_tenant_url",
                 label="Qlik Tenant URL",
                 initial=default_tenant,
                 placeholder="https://your-tenant.us.qlikcloud.com",
-                description="Your Qlik Cloud tenant URL (MCP endpoint: <tenant>/api/ai/mcp)",
+                description="Your Qlik Cloud tenant URL",
             ),
             TextInput(
                 id="qlik_client_id",
                 label="OAuth Client ID",
                 initial=default_client_id,
                 placeholder="Your OAuth client ID",
-                description="OAuth client ID created by your Qlik tenant admin (scopes: user_default, mcp:execute)",
-            ),
-            TextInput(
-                id="qlik_client_secret",
-                label="OAuth Client Secret",
-                initial=default_client_secret,
-                placeholder="Leave empty if not required",
-                description="OAuth client secret (leave empty for most configurations)",
+                description="OAuth client ID from your Qlik tenant admin (scopes: user_default, mcp:execute)",
             ),
             # --- AWS Bedrock Settings ---
             TextInput(
@@ -290,64 +416,46 @@ async def on_chat_start():
     cl.user_session.set("chat_model", chat_model)
     cl.user_session.set("chat_messages", [])
 
-    # Auto-connect to Qlik MCP if env vars are set
+    # Save Qlik settings for the connect button
+    cl.user_session.set("qlik_tenant_url", default_tenant)
+    cl.user_session.set("qlik_client_id", default_client_id)
+
+    # Welcome message with Connect button if tenant/client_id are set
     if default_tenant and default_client_id:
-        cl.user_session.set("qlik_tenant_url", default_tenant)
-        cl.user_session.set("qlik_client_id", default_client_id)
-        cl.user_session.set("qlik_client_secret", default_client_secret)
-        try:
-            mcp_client, tools = await connect_qlik_mcp(default_tenant, default_client_id, default_client_secret)
-            cl.user_session.set("mcp_client", mcp_client)
-            cl.user_session.set("mcp_tools", tools)
-            build_agent_if_ready()
-
-            tool_names = [t.name for t in tools]
-            actions = [cl.Action(name="reconnect_mcp", label="Reconnect to Qlik MCP", description="Re-establish the MCP connection", payload={})]
-            await cl.Message(
-                content=(
-                    "![Qlik](/public/qlik-logo.png)\n\n"
-                    "## Your Friendly Neighborhood AI Assistant\n\n"
-                    f"Connected to Qlik MCP with **{len(tools)} tools**:\n"
-                    + "\n".join(f"- `{name}`" for name in tool_names)
-                ),
-                actions=actions,
-            ).send()
-            return
-        except Exception as e:
-            logger.error(f"Auto-connect failed: {e}")
-            await cl.Message(
-                content=(
-                    "![Qlik](/public/qlik-logo.png)\n\n"
-                    "## Your Friendly Neighborhood AI Assistant\n\n"
-                    f"Auto-connect to Qlik MCP failed:\n"
-                    f"```\n{str(e)}\n```\n\n"
-                    f"Open **Settings** to configure your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
-                    f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
-                )
-            ).send()
-            return
-
-    await cl.Message(
-        content=(
-            "![Qlik](/public/qlik-logo.png)\n\n"
-            "## Your Friendly Neighborhood AI Assistant\n\n"
-            "Let's get you connected:\n\n"
-            "**Qlik Cloud:**\n"
-            "1. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
-            "2. Optionally enter the **OAuth Client Secret** (leave empty if not required)\n\n"
-            "**AWS Bedrock:**\n"
-            "3. Enter your **AWS Access Key ID** and **Secret Access Key**\n"
-            "4. Select your **Region** and **Model**\n\n"
-            "Click **Confirm** to connect!\n\n"
-            f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
-        )
-    ).send()
+        actions = [
+            cl.Action(
+                name="connect_qlik",
+                label="Connect to Qlik Cloud",
+                description="Authenticate with Qlik Cloud via OAuth",
+                payload={},
+            )
+        ]
+        await cl.Message(
+            content=(
+                "![Qlik](/public/qlik-logo.png)\n\n"
+                "## Your Friendly Neighborhood AI Assistant\n\n"
+                "Click the button below to sign in to Qlik Cloud."
+            ),
+            actions=actions,
+        ).send()
+    else:
+        await cl.Message(
+            content=(
+                "![Qlik](/public/qlik-logo.png)\n\n"
+                "## Your Friendly Neighborhood AI Assistant\n\n"
+                "Let's get you connected:\n\n"
+                "1. Open **Settings** (gear icon)\n"
+                "2. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
+                "3. Enter your **AWS Access Key ID** and **Secret Access Key**\n"
+                "4. Click **Confirm**, then click **Connect to Qlik Cloud**\n\n"
+                f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
+            )
+        ).send()
 
 
 @cl.on_settings_update
 async def on_settings_update(settings: dict):
-    """Handle settings changes — reconnect MCP and/or rebuild model."""
-    # Extract settings
+    """Handle settings changes — update model and show Connect button."""
     # AWS settings
     access_key = (settings.get("aws_access_key_id") or "").strip()
     secret_key = (settings.get("aws_secret_access_key") or "").strip()
@@ -360,63 +468,33 @@ async def on_settings_update(settings: dict):
     # Qlik settings
     tenant_url = (settings.get("qlik_tenant_url") or "").strip()
     client_id = (settings.get("qlik_client_id") or "").strip()
-    client_secret = (settings.get("qlik_client_secret") or "").strip()
 
-    # Update Bedrock model with credentials
+    # Update Bedrock model
     chat_model = get_chat_model(model_id, region, temperature, max_tokens, access_key, secret_key)
     cl.user_session.set("chat_model", chat_model)
-
-    # Check if Qlik settings changed
-    old_tenant = cl.user_session.get("qlik_tenant_url", "")
-    old_id = cl.user_session.get("qlik_client_id", "")
-    old_secret = cl.user_session.get("qlik_client_secret", "")
-
-    qlik_changed = (tenant_url != old_tenant or client_id != old_id or client_secret != old_secret)
 
     # Save Qlik settings
     cl.user_session.set("qlik_tenant_url", tenant_url)
     cl.user_session.set("qlik_client_id", client_id)
-    cl.user_session.set("qlik_client_secret", client_secret)
 
-    # Reconnect MCP if Qlik settings changed
-    if qlik_changed and tenant_url and client_id:
-        await disconnect_qlik_mcp()
-        try:
-            mcp_client, tools = await connect_qlik_mcp(tenant_url, client_id, client_secret)
-            cl.user_session.set("mcp_client", mcp_client)
-            cl.user_session.set("mcp_tools", tools)
-            build_agent_if_ready()
-
-            tool_names = [t.name for t in tools]
-            actions = [cl.Action(name="reconnect_mcp", label="Reconnect to Qlik MCP", description="Re-establish the MCP connection", payload={})]
-            await cl.Message(
-                content=(
-                    f"Settings updated. Connected to Qlik MCP with **{len(tools)} tools**:\n"
-                    + "\n".join(f"- `{name}`" for name in tool_names)
-                    + f"\n\nModel: **{model_name}** in **{region}**"
-                ),
-                actions=actions,
-            ).send()
-            return
-        except Exception as e:
-            await cl.Message(
-                content=f"Settings updated but Qlik MCP connection failed:\n```\n{str(e)}\n```"
-            ).send()
-            return
-
-    # Just rebuild agent with new model if MCP already connected
+    # Rebuild agent if tools are already loaded (model change)
     build_agent_if_ready()
+
     await cl.Message(
         content=f"Settings updated: **{model_name}** in **{region}** (temp={temperature}, max_tokens={max_tokens})"
     ).send()
 
+    # Show Connect button if Qlik settings are filled but not yet authenticated
+    if tenant_url and client_id and not cl.user_session.get("qlik_tokens"):
+        await send_connect_button()
+
 
 @cl.on_message
 async def on_message(message: cl.Message):
-    """Process user messages through the agent, with auto-reconnect on timeout."""
+    """Process user messages through the agent."""
     agent = cast(CompiledStateGraph | None, cl.user_session.get("agent"))
 
-    # If no agent, try to reconnect
+    # If no agent, try to reconnect with existing token
     if not agent:
         connected = await ensure_mcp_connected()
         if connected:
@@ -424,11 +502,13 @@ async def on_message(message: cl.Message):
         else:
             await cl.Message(
                 content=(
-                    "Not connected to Qlik MCP. Open **Settings** (gear icon) "
-                    "to enter your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
+                    "Not connected to Qlik MCP. "
+                    "Click **Connect to Qlik Cloud** to authenticate, "
+                    "or open **Settings** to configure your credentials.\n\n"
                     f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
                 )
             ).send()
+            await send_connect_button()
             return
 
     config = RunnableConfig(configurable={"thread_id": cl.context.session.id})
@@ -457,7 +537,7 @@ async def on_message(message: cl.Message):
     except Exception as e:
         error_str = str(e).lower()
         # Auto-reconnect on connection/timeout errors
-        if any(keyword in error_str for keyword in ["timeout", "closed", "connection", "eof", "reset"]):
+        if any(keyword in error_str for keyword in ["timeout", "closed", "connection", "eof", "reset", "401", "unauthorized"]):
             logger.warning(f"MCP connection error, attempting reconnect: {e}")
             cl.user_session.set("agent", None)
             connected = await ensure_mcp_connected()
@@ -467,9 +547,9 @@ async def on_message(message: cl.Message):
                 ).send()
             else:
                 await cl.Message(
-                    content=f"Connection lost and auto-reconnect failed:\n```\n{str(e)}\n```"
+                    content=f"Connection lost and auto-reconnect failed:\n```\n{str(e)}\n```\n\nPlease re-authenticate."
                 ).send()
-                await send_reconnect_button()
+                await send_connect_button()
         else:
             await cl.Message(content=f"Error: {str(e)}").send()
             logger.error(tb.format_exc())
