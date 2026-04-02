@@ -15,7 +15,10 @@
     if (!dialog.textContent.includes("MCP") && !dialog.textContent.includes("Connect an")) return;
     if (dialog.querySelector("#qlik-form")) return;
 
+    // Hide ALL existing Chainlit content including tabs
     Array.from(dialog.children).forEach(c => (c.style.display = "none"));
+    // Also hide any tab bars that might re-render
+    dialog.querySelectorAll('[role="tablist"], [class*="Tabs"]').forEach(t => (t.style.display = "none"));
 
     const tenantVal = localStorage.getItem("qlik_tenant_url") || defaults.tenant_url || "";
     const clientVal = localStorage.getItem("qlik_client_id") || defaults.client_id || "";
