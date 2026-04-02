@@ -325,15 +325,7 @@ async def on_chat_start():
 
     await cl.Message(
         content=(
-            "Your friendly neighborhood **Qlik AI Assistant** is here!\n\n"
-            "Let's get you connected:\n\n"
-            "**Qlik Cloud:**\n"
-            "1. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
-            "2. Optionally enter the **OAuth Client Secret** (leave empty if not required)\n\n"
-            "**AWS Bedrock:**\n"
-            "3. Enter your **AWS Access Key ID** and **Secret Access Key**\n"
-            "4. Select your **Region** and **Model**\n\n"
-            "5. Click **Confirm** to connect!\n\n"
+            "Open **Settings** to enter your Qlik and AWS credentials, then click **Confirm** to connect.\n\n"
             f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
         )
     ).send()
