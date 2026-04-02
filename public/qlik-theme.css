@@ -60,29 +60,11 @@ a:hover {
   border-left: 3px solid #009845;
 }
 
-/* Transparent background for inline images (logo) */
-[data-testid="assistant-message"] img {
+/* Kill the gray bg-muted container that Chainlit wraps around images */
+.bg-muted:has(> img),
+div.bg-muted.rounded-md.overflow-hidden {
   background: transparent !important;
-}
-
-[data-testid="assistant-message"] img[src*="qlik-logo"] {
-  background: transparent !important;
-  max-height: 120px;
-  width: auto;
-}
-
-/* Kill the card/container background around images in messages */
-[data-testid="assistant-message"] p:has(img),
-[data-testid="assistant-message"] div:has(> img),
-[data-testid="assistant-message"] span:has(> img),
-[data-testid="assistant-message"] figure,
-[data-testid="assistant-message"] picture,
-[data-testid="assistant-message"] [class*="image"],
-[data-testid="assistant-message"] [class*="inline-image"],
-[data-testid="assistant-message"] [class*="Image"] {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
+  border-radius: 0 !important;
 }
 
 /* Settings sidebar polish */
