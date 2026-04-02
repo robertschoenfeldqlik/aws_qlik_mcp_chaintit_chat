@@ -188,10 +188,8 @@ async def on_message(message: cl.Message):
             cl.user_session.set("mcp_client", mcp_client)
             cl.user_session.set("mcp_tools", tools)
             build_agent_if_ready()
-            tool_names = [t.name for t in tools]
             await cl.Message(
-                content=f"Connected to Qlik MCP! **{len(tools)} tools** available:\n"
-                + "\n".join(f"- `{n}`" for n in tool_names)
+                content=f"Connected to Qlik MCP — **{len(tools)} tools** available. Ask me anything!"
             ).send()
         except Exception as e:
             logger.error(f"MCP connection failed: {e}")
