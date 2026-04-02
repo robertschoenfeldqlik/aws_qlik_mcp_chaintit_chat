@@ -26,16 +26,23 @@ from typing import cast
 
 load_dotenv()
 
-# Register a defaults endpoint for the JS form to load saved Qlik credentials
+# Register defaults endpoint — insert before Chainlit's catch-all route
 from chainlit.server import app as fastapi_app
-from fastapi import Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.routing import Route
 
-@fastapi_app.get("/auth/qlik/defaults")
+_qlik_router = APIRouter()
+
+@_qlik_router.get("/auth/qlik/defaults")
 async def qlik_defaults(request: Request):
     tenant_url = os.getenv("QLIK_TENANT_URL", "")
     client_id = os.getenv("QLIK_OAUTH_CLIENT_ID", "")
     return JSONResponse({"tenant_url": tenant_url, "client_id": client_id})
+
+# Insert routes at position 0 so they run before Chainlit's catch-all
+for route in reversed(_qlik_router.routes):
+    fastapi_app.routes.insert(0, route)
 
 logger.remove()
 logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
