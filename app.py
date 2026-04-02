@@ -25,7 +25,7 @@ from botocore.config import Config
 from dotenv import load_dotenv
 from typing import cast
 
-from qlik_oauth import register_oauth_routes
+from qlik_oauth import register_oauth_routes, completed_tokens
 
 load_dotenv()
 
@@ -145,16 +145,25 @@ async def on_mcp_disconnect(name, session):
 # ---------------------------------------------------------------------------
 
 async def poll_for_oauth_and_connect():
-    """Poll for OAuth token, then connect to MCP. Called from on_chat_start."""
-    for _ in range(90):  # 3 minutes max
-        await asyncio.sleep(2)
-        if cl.user_session.get("oauth_complete"):
-            token = cl.user_session.get("qlik_access_token")
-            tenant_url = cl.user_session.get("qlik_tenant_url")
-            if token and tenant_url:
+    """Poll completed_tokens for any new OAuth token, then connect to MCP.
+
+    Runs as a background task per session. Checks every 2s for up to 3 minutes.
+    When a token appears, consumes it, connects MCP, and stops.
+    """
+    while True:
+        for _ in range(90):  # 3 minutes per cycle
+            await asyncio.sleep(2)
+
+            # Check if any OAuth flow completed
+            for state, token_data in list(completed_tokens.items()):
+                # Consume it
+                completed_tokens.pop(state, None)
+                access_token = token_data["access_token"]
+                tenant_url = token_data["tenant_url"]
+
                 try:
                     await disconnect_qlik_mcp()
-                    mcp_client, tools = await connect_qlik_mcp(tenant_url, token)
+                    mcp_client, tools = await connect_qlik_mcp(tenant_url, access_token)
                     cl.user_session.set("mcp_client", mcp_client)
                     cl.user_session.set("mcp_tools", tools)
                     build_agent_if_ready()
@@ -165,9 +174,10 @@ async def poll_for_oauth_and_connect():
                     ).send()
                 except Exception as e:
                     await cl.Message(content=f"OAuth succeeded but MCP connection failed:\n```\n{e}\n```").send()
-            cl.user_session.set("oauth_complete", False)
-            return
-    # Timeout — no action needed, user can retry via plug icon
+                return  # Done — connected
+
+        # After 3 min timeout, loop again (user might click Connect later)
+        await asyncio.sleep(5)
 
 
 # ---------------------------------------------------------------------------
