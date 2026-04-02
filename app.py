@@ -305,7 +305,9 @@ async def on_chat_start():
             actions = [cl.Action(name="reconnect_mcp", label="Reconnect to Qlik MCP", description="Re-establish the MCP connection", payload={})]
             await cl.Message(
                 content=(
-                    f"Your friendly neighborhood **Qlik AI Assistant** is ready! Connected to Qlik MCP with **{len(tools)} tools**:\n"
+                    "![Qlik](/public/qlik-logo.png)\n\n"
+                    "## Your Friendly Neighborhood AI Assistant\n\n"
+                    f"Connected to Qlik MCP with **{len(tools)} tools**:\n"
                     + "\n".join(f"- `{name}`" for name in tool_names)
                 ),
                 actions=actions,
@@ -315,9 +317,11 @@ async def on_chat_start():
             logger.error(f"Auto-connect failed: {e}")
             await cl.Message(
                 content=(
-                    f"Your friendly neighborhood **Qlik AI Assistant** is here, but auto-connect to Qlik MCP failed:\n"
+                    "![Qlik](/public/qlik-logo.png)\n\n"
+                    "## Your Friendly Neighborhood AI Assistant\n\n"
+                    f"Auto-connect to Qlik MCP failed:\n"
                     f"```\n{str(e)}\n```\n\n"
-                    f"Open **Settings** (gear icon) to configure your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
+                    f"Open **Settings** to configure your Qlik Tenant URL and OAuth Client ID, then click Confirm.\n\n"
                     f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
                 )
             ).send()
@@ -325,7 +329,16 @@ async def on_chat_start():
 
     await cl.Message(
         content=(
-            "Open **Settings** to enter your Qlik and AWS credentials, then click **Confirm** to connect.\n\n"
+            "![Qlik](/public/qlik-logo.png)\n\n"
+            "## Your Friendly Neighborhood AI Assistant\n\n"
+            "Let's get you connected:\n\n"
+            "**Qlik Cloud:**\n"
+            "1. Enter your **Qlik Tenant URL** and **OAuth Client ID**\n"
+            "2. Optionally enter the **OAuth Client Secret** (leave empty if not required)\n\n"
+            "**AWS Bedrock:**\n"
+            "3. Enter your **AWS Access Key ID** and **Secret Access Key**\n"
+            "4. Select your **Region** and **Model**\n\n"
+            "Click **Confirm** to connect!\n\n"
             f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
         )
     ).send()
