@@ -1,6 +1,6 @@
 """Chainlit chat app with AWS Bedrock LLM and Qlik MCP integration.
 
-Plug icon → Qlik Cloud SSE connection (MCP protocol handles OAuth).
+Plug icon → Qlik Cloud form → OAuth PKCE → streamable-http MCP connection.
 Gear icon → AWS Bedrock settings.
 """
 
@@ -10,42 +10,29 @@ import traceback as tb
 
 import chainlit as cl
 from chainlit.input_widget import Select, Slider, TextInput
+from chainlit.server import app as fastapi_app
 from langchain_aws.chat_models import ChatBedrockConverse
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_mcp_adapters.tools import load_mcp_tools
+from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import create_react_agent
 from loguru import logger
-from mcp import ClientSession
 
 import boto3
 from botocore.config import Config
 from dotenv import load_dotenv
 from typing import cast
 
+from qlik_oauth import register_oauth_routes, pending_connections
+
 load_dotenv()
-
-# Register defaults endpoint — insert before Chainlit's catch-all route
-from chainlit.server import app as fastapi_app
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
-from starlette.routing import Route
-
-_qlik_router = APIRouter()
-
-@_qlik_router.get("/auth/qlik/defaults")
-async def qlik_defaults(request: Request):
-    tenant_url = os.getenv("QLIK_TENANT_URL", "")
-    client_id = os.getenv("QLIK_OAUTH_CLIENT_ID", "")
-    return JSONResponse({"tenant_url": tenant_url, "client_id": client_id})
-
-# Insert routes at position 0 so they run before Chainlit's catch-all
-for route in reversed(_qlik_router.routes):
-    fastapi_app.routes.insert(0, route)
 
 logger.remove()
 logger.add(sys.stderr, level=os.getenv("LOG_LEVEL", "INFO"))
+
+# Register OAuth routes
+register_oauth_routes(fastapi_app)
 
 BEDROCK_MODELS = {
     "Amazon Nova Pro": "amazon.nova-pro-v1:0",
@@ -82,8 +69,38 @@ def get_chat_model(model_id, region, temperature, max_tokens, api_key=""):
 
 
 # ---------------------------------------------------------------------------
-# Agent
+# Qlik MCP Connection (streamable-http + OAuth Bearer token)
 # ---------------------------------------------------------------------------
+
+async def connect_qlik_mcp(tenant_url: str, access_token: str, client_id: str):
+    """Connect to Qlik MCP using streamable-http with Bearer token + X-Agent-Id."""
+    mcp_url = f"{tenant_url.rstrip('/')}/api/ai/mcp"
+    logger.info(f"Connecting to MCP: {mcp_url}")
+
+    mcp_client = MultiServerMCPClient({
+        "qlik": {
+            "url": mcp_url,
+            "transport": "streamable_http",
+            "headers": {
+                "Authorization": f"Bearer {access_token}",
+                "X-Agent-Id": client_id,
+            },
+        },
+    })
+    try:
+        tools = await mcp_client.get_tools()
+    except ExceptionGroup as eg:
+        msgs = [f"{type(e).__name__}: {e}" for e in eg.exceptions]
+        raise RuntimeError("; ".join(msgs)) from eg
+    logger.info(f"MCP connected with {len(tools)} tools")
+    return mcp_client, tools
+
+
+async def disconnect_qlik_mcp():
+    cl.user_session.set("mcp_client", None)
+    cl.user_session.set("mcp_tools", None)
+    cl.user_session.set("agent", None)
+
 
 def build_agent_if_ready():
     chat_model = cl.user_session.get("chat_model")
@@ -93,42 +110,6 @@ def build_agent_if_ready():
         cl.user_session.set("agent", agent)
         return agent
     return None
-
-
-# ---------------------------------------------------------------------------
-# MCP Connect/Disconnect — Chainlit's native plug icon handles SSE + OAuth
-# ---------------------------------------------------------------------------
-
-@cl.on_mcp_connect
-async def on_mcp_connect(connection, session: ClientSession):
-    """Called when Chainlit's MCP dialog connects to an SSE server."""
-    await session.initialize()
-    tools = await load_mcp_tools(session)
-
-    chat_model = cl.user_session.get("chat_model")
-    agent = create_react_agent(chat_model, tools, prompt=SYSTEM_PROMPT)
-
-    cl.user_session.set("agent", agent)
-    cl.user_session.set("mcp_session", session)
-    cl.user_session.set("mcp_tools", tools)
-
-    tool_names = [t.name for t in tools]
-    await cl.Message(
-        content=f"Connected to Qlik MCP! **{len(tools)} tools** available:\n"
-        + "\n".join(f"- `{name}`" for name in tool_names)
-    ).send()
-
-
-@cl.on_mcp_disconnect
-async def on_mcp_disconnect(name: str, session: ClientSession):
-    try:
-        await session.__aexit__(None, None, None)
-    except Exception:
-        pass
-    cl.user_session.set("mcp_session", None)
-    cl.user_session.set("mcp_tools", None)
-    cl.user_session.set("agent", None)
-    logger.info(f"Disconnected from MCP server: {name}")
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +143,7 @@ async def on_chat_start():
         content=(
             "![Qlik](/public/qlik-logo.png)\n\n"
             "## Your Friendly Neighborhood AI Assistant\n\n"
-            "1. Click the **plug icon** to connect to Qlik Cloud\n"
-            "2. Click the **gear icon** to configure AWS Bedrock\n\n"
-            f"[Qlik MCP setup guide]({QLIK_MCP_HELP_URL})"
+            "Ask me anything — or connect to Qlik Cloud for data access."
         )
     ).send()
 
@@ -181,15 +160,38 @@ async def on_settings_update(settings: dict):
     chat_model = get_chat_model(model_id, region, temperature, max_tokens, api_key)
     cl.user_session.set("chat_model", chat_model)
     build_agent_if_ready()
-
     await cl.Message(content=f"Settings updated: **{model_name}** in **{region}**").send()
 
 
 @cl.on_message
 async def on_message(message: cl.Message):
+    # Check for pending MCP connection from OAuth flow
+    pending = pending_connections.pop("default", None)
+    if pending:
+        token = pending["access_token"]
+        tenant = pending["tenant_url"]
+        cid = pending["client_id"]
+        cl.user_session.set("qlik_access_token", token)
+        cl.user_session.set("qlik_tenant_url", tenant)
+        cl.user_session.set("qlik_client_id", cid)
+        try:
+            await disconnect_qlik_mcp()
+            mcp_client, tools = await connect_qlik_mcp(tenant, token, cid)
+            cl.user_session.set("mcp_client", mcp_client)
+            cl.user_session.set("mcp_tools", tools)
+            build_agent_if_ready()
+            tool_names = [t.name for t in tools]
+            await cl.Message(
+                content=f"Connected to Qlik MCP! **{len(tools)} tools** available:\n"
+                + "\n".join(f"- `{n}`" for n in tool_names)
+            ).send()
+        except Exception as e:
+            logger.error(f"MCP connection failed: {e}")
+            await cl.Message(content=f"Qlik MCP connection failed:\n```\n{e}\n```").send()
+
     agent = cast(CompiledStateGraph | None, cl.user_session.get("agent"))
 
-    # If no agent (no MCP), use the LLM directly
+    # No agent — use LLM directly
     if not agent:
         chat_model = cl.user_session.get("chat_model")
         if not chat_model:
@@ -205,8 +207,8 @@ async def on_message(message: cl.Message):
             logger.error(tb.format_exc())
         return
 
+    # Agent with MCP tools
     config = RunnableConfig(configurable={"thread_id": cl.context.session.id})
-
     try:
         response_message = cl.Message(content="")
         async for msg, metadata in agent.astream(
@@ -219,7 +221,6 @@ async def on_message(message: cl.Message):
                       and isinstance(msg.content[0], dict) and msg.content[0].get("type") == "text"):
                     await response_message.stream_token(msg.content[0]["text"])
         await response_message.send()
-
     except Exception as e:
         error_str = str(e).lower()
         if any(kw in error_str for kw in ["timeout", "closed", "connection", "eof", "reset"]):

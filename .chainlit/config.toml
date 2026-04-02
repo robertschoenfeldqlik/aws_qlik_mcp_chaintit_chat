@@ -83,7 +83,7 @@ reaction_on_message_received = false
     enabled = true
 
 [features.mcp.streamable-http]
-    enabled = false
+    enabled = true
 
 [features.mcp.stdio]
     enabled = false
