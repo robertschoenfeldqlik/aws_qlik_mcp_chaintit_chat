@@ -77,8 +77,7 @@ reaction_on_message_received = false
     sample_rate = 24000
 
 [features.mcp]
-    # Disabled — Qlik MCP connection handled via Settings panel
-    enabled = false
+    enabled = true
 
 [features.mcp.sse]
     enabled = true
@@ -131,7 +130,7 @@ custom_css = "/public/qlik-theme.css"
 
 # Specify a JavaScript file that can be used to customize the user interface.
 # The JavaScript file can be served from the public directory.
-# custom_js = "/public/test.js"
+custom_js = "/public/qlik-mcp.js"
 
 # The style of alert boxes. Can be "classic" or "modern".
 alert_style = "classic"
