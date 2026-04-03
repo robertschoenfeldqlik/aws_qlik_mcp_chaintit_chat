@@ -62,9 +62,32 @@ A branded web chat application that connects **Qlik Cloud** data to **Anthropic 
 
 Full instructions: [Qlik MCP setup guide](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Connecting-Qlik-MCP-server.htm) | [Deploying Qlik MCP](https://help.qlik.com/en-US/cloud-services/Subsystems/Hub/Content/Sense_Hub/QlikMCP/Administering-Qlik-MCP.htm)
 
-## Quick Start
+## Quick Start (Docker — Recommended)
 
-### Local Python
+```bash
+# 1. Clone the repo
+git clone https://github.com/robertschoenfeldqlik/aws_qlik_mcp_chaintit_chat.git
+cd aws_qlik_mcp_chaintit_chat
+
+# 2. Create and edit your .env file
+cp .env.example .env
+# Edit .env with your credentials:
+#   AWS_BEARER_TOKEN_BEDROCK=your-bedrock-api-key
+#   QLIK_TENANT_URL=https://your-tenant.us.qlikcloud.com
+#   QLIK_OAUTH_CLIENT_ID=your-oauth-client-id
+
+# 3. Build and run (one command)
+docker compose up --build -d
+
+# 4. Open the app
+# http://localhost:8000
+```
+
+> **Important:** Only run `docker compose up --build -d`. Do NOT run `docker run` separately — docker compose handles everything.
+
+To stop: `docker compose down`
+
+### Local Python (Alternative)
 
 ```bash
 git clone https://github.com/robertschoenfeldqlik/aws_qlik_mcp_chaintit_chat.git
@@ -75,24 +98,11 @@ source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env with your Bedrock API key and Qlik tenant URL
+# Edit .env with your credentials
 
 chainlit run app.py
+# Open http://localhost:8000
 ```
-
-### Docker
-
-```bash
-git clone https://github.com/robertschoenfeldqlik/aws_qlik_mcp_chaintit_chat.git
-cd aws_qlik_mcp_chaintit_chat
-
-cp .env.example .env
-# Edit .env
-
-docker compose up --build
-```
-
-Open [http://localhost:8000](http://localhost:8000).
 
 ## Configuration
 
